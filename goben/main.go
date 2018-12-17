@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 	"unicode"
+	"io/ioutil"
 )
 
 const version = "0.4"
@@ -29,6 +30,7 @@ type config struct {
 	export         string
 	csv            string
 	ascii          bool // plot ascii chart
+	silent         bool // suppress any output
 	tlsCert        string
 	tlsKey         string
 	tls            bool
@@ -77,11 +79,15 @@ func main() {
 	flag.StringVar(&app.export, "export", "", "output filename for YAML exporting test results on client\n'%d' is parallel connection index to host\n'%s' is hostname:port\nexample: -export export-%d-%s.yaml")
 	flag.StringVar(&app.csv, "csv", "", "output filename for CSV exporting test results on client\n'%d' is parallel connection index to host\n'%s' is hostname:port\nexample: -csv export-%d-%s.csv")
 	flag.BoolVar(&app.ascii, "ascii", true, "plot ascii chart")
+	flag.BoolVar(&app.silent, "silent", false, "Do not print any output")
 	flag.StringVar(&app.tlsKey, "key", "key.pem", "TLS key file")
 	flag.StringVar(&app.tlsCert, "cert", "cert.pem", "TLS cert file")
 	flag.BoolVar(&app.tls, "tls", true, "set to false to disable TLS")
 
 	flag.Parse()
+	if (app.silent) {
+		log.SetOutput(ioutil.Discard)
+	}
 
 	if errChart := badExportFilename("-chart", app.chart); errChart != nil {
 		log.Panicf("%s", errChart.Error())

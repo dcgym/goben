@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"runtime"
@@ -10,7 +11,6 @@ import (
 	"strings"
 	"time"
 	"unicode"
-	"io/ioutil"
 )
 
 const version = "0.4"

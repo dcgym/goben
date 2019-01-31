@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"runtime"
 	"strconv"
 	"strings"
@@ -68,7 +69,7 @@ func main() {
 	flag.StringVar(&app.defaultPort, "defaultPort", ":8080", "default port")
 	flag.IntVar(&app.connections, "connections", 1, "number of parallel connections")
 	flag.StringVar(&app.reportInterval, "reportInterval", "2s", "periodic report interval\nunspecified time unit defaults to second")
-	flag.StringVar(&app.totalDuration, "totalDuration", "10s", "test total duration\nunspecified time unit defaults to second")
+	flag.StringVar(&app.totalDuration, "totalDuration", "10s", "test total duration\nunspecified time unit defaults to second\ninf means unlimited time")
 	flag.IntVar(&app.opt.ReadSize, "readSize", 50000, "read buffer size in bytes")
 	flag.IntVar(&app.opt.WriteSize, "writeSize", 50000, "write buffer size in bytes")
 	flag.BoolVar(&app.passiveClient, "passiveClient", false, "suppress client writes")
@@ -146,6 +147,11 @@ func main() {
 func defaultTimeUnit(s string) string {
 	if len(s) < 1 {
 		return s
+	}
+	// enable the client and server to generate traffic for an unlimited time duration
+	if s == "inf" {
+		// the longest possible time duration is 290 years, which is effectively infinite long
+		return strconv.FormatInt(math.MaxInt64, 10) + "ns"
 	}
 	if unicode.IsDigit(rune(s[len(s)-1])) {
 		return s + "s"

@@ -139,7 +139,7 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 	var input *ChartData
 	var output *ChartData
 
-	if app.csv != "" || app.export != "" || app.chart != "" || app.ascii {
+	if !app.disableChart && (app.csv != "" || app.export != "" || app.chart != "" || app.ascii) {
 		input = &info.Input
 		output = &info.Output
 	}

@@ -105,11 +105,12 @@ func main() {
 	}
 
 	app.reportInterval = defaultTimeUnit(app.reportInterval)
-	app.totalDuration = defaultTimeUnit(app.totalDuration)
+	
 	// when the user want to generate the traffic for unlimited time, disable chart rendering to avoid memory overflow
 	if app.totalDuration == "inf" {
 		app.disableChart = true
 	}
+	app.totalDuration = defaultTimeUnit(app.totalDuration)
 
 	var errInterval error
 	app.opt.ReportInterval, errInterval = time.ParseDuration(app.reportInterval)

@@ -3,13 +3,14 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
+	"math"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 	"unicode"
-	"io/ioutil"
 )
 
 const version = "0.4"
@@ -68,7 +69,7 @@ func main() {
 	flag.StringVar(&app.defaultPort, "defaultPort", ":8080", "default port")
 	flag.IntVar(&app.connections, "connections", 1, "number of parallel connections")
 	flag.StringVar(&app.reportInterval, "reportInterval", "2s", "periodic report interval\nunspecified time unit defaults to second")
-	flag.StringVar(&app.totalDuration, "totalDuration", "10s", "test total duration\nunspecified time unit defaults to second")
+	flag.StringVar(&app.totalDuration, "totalDuration", "10s", "test total duration\nunspecified time unit defaults to second\ninf means unlimited time, and when it's set to inf, no ascii chart will be rendered")
 	flag.IntVar(&app.opt.ReadSize, "readSize", 50000, "read buffer size in bytes")
 	flag.IntVar(&app.opt.WriteSize, "writeSize", 50000, "write buffer size in bytes")
 	flag.BoolVar(&app.passiveClient, "passiveClient", false, "suppress client writes")
@@ -78,7 +79,7 @@ func main() {
 	flag.StringVar(&app.chart, "chart", "", "output filename for rendering chart on client\n'%d' is parallel connection index to host\n'%s' is hostname:port\nexample: -chart chart-%d-%s.png")
 	flag.StringVar(&app.export, "export", "", "output filename for YAML exporting test results on client\n'%d' is parallel connection index to host\n'%s' is hostname:port\nexample: -export export-%d-%s.yaml")
 	flag.StringVar(&app.csv, "csv", "", "output filename for CSV exporting test results on client\n'%d' is parallel connection index to host\n'%s' is hostname:port\nexample: -csv export-%d-%s.csv")
-	flag.BoolVar(&app.ascii, "ascii", true, "plot ascii chart")
+	flag.BoolVar(&app.ascii, "ascii", true, "plot ascii chart\nthis will automatically set to false when totalDuration is inf")
 	flag.BoolVar(&app.silent, "silent", false, "Do not print any output")
 	flag.StringVar(&app.tlsKey, "key", "key.pem", "TLS key file")
 	flag.StringVar(&app.tlsCert, "cert", "cert.pem", "TLS cert file")
@@ -102,6 +103,11 @@ func main() {
 	}
 
 	app.reportInterval = defaultTimeUnit(app.reportInterval)
+
+	// when the user want to generate the traffic for unlimited time, disable chart rendering to avoid memory overflow
+	if app.totalDuration == "inf" {
+		app.ascii = false
+	}
 	app.totalDuration = defaultTimeUnit(app.totalDuration)
 
 	var errInterval error
@@ -146,6 +152,11 @@ func main() {
 func defaultTimeUnit(s string) string {
 	if len(s) < 1 {
 		return s
+	}
+	// enable the client and server to generate traffic for an unlimited time duration
+	if s == "inf" {
+		// the longest possible time duration is 290 years, which is effectively infinite long
+		return strconv.FormatInt(math.MaxInt64, 10) + "ns"
 	}
 	if unicode.IsDigit(rune(s[len(s)-1])) {
 		return s + "s"

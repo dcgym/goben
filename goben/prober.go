@@ -6,6 +6,7 @@
 package main
 
 import (
+	"fmt"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
 	"log"
@@ -17,11 +18,11 @@ import (
 
 const (
 	timeBytesSize = 8
-	ICMPproto  = 1
+	protocolICMP  = 1
 )
 
 type ProberConfig struct {
-	proto         string        // the protocol for the ICMP packet connection
+	proto         string        // the protocol for the ICMP packet connection (ie. ip4:icmp, ip4:1, ip6:58 ...)
 	source        string        // the server address
 	targets       []string      // the hosts' addresses
 	probeInterval time.Duration // probe probeInterval
@@ -68,7 +69,7 @@ func (p *Prober) packetToSend(runId, seq uint16) []byte {
 	bytes, err := msg.Marshal(nil)
 	if err != nil {
 		// This should never happen
-		log.Fatalf("Error marshalling the ICMP message. Err: %v\n", err)
+		log.Panicf("Error marshalling the ICMP message. Err: %v\n", err)
 	}
 	return bytes
 }
@@ -89,7 +90,7 @@ func (p *Prober) packetToRecv(pktbuf []byte) (net.IP, *icmp.Message, error) {
 		senderIP = sender.IP
 	}
 
-	msg, err := icmp.ParseMessage(ICMPproto, pktbuf[:n])
+	msg, err := icmp.ParseMessage(protocolICMP, pktbuf[:n])
 	if err != nil {
 		return nil, nil, err
 	}
@@ -121,7 +122,7 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 	// keep track if the packet arrived has been received before
 	received := make(map[string]bool)
 	// a counter to make sure we read all packets arrived (including the outstanding
-	// ones after the sender has closed the connection
+	// ones after the sender has closed the connection)
 	outstandingPkts := 0
 	// the byte stream buffer
 	pktbuf := make([]byte, 1500)
@@ -160,7 +161,8 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 		}
 
 		// check if we have seen this packet before
-		if received[target] {
+		pktID := fmt.Sprintf("%s_%d", target, echoMsg.Seq)
+		if received[pktID] {
 			log.Printf("Duplicate reply from=%s id=%d seq=%d rtt=%s\n", target, echoMsg.ID, echoMsg.Seq, rtt)
 			continue
 		}
@@ -170,7 +172,7 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 		log.Printf("RTT: src=%s, dst=%s, rtt=%s\n", p.config.source, target, rtt)
 
 		// bookkeeping
-		received[target] = true
+		received[pktID] = true
 		outstandingPkts--
 	}
 }
@@ -196,7 +198,7 @@ func (p *Prober) runProbe() {
 // Start must be called after Init() is called
 func (p *Prober) Start() {
 	if p.conn == nil {
-		log.Fatalf("The prober from host %s is not properly initialized.\n", p.config.source)
+		log.Panicf("The prober from host %s is not properly initialized.\n", p.config.source)
 	}
 	defer p.conn.Close()
 	for range time.Tick(p.config.probeInterval) {

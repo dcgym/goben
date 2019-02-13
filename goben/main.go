@@ -35,6 +35,9 @@ type config struct {
 	tlsCert        string
 	tlsKey         string
 	tls            bool
+	probeInterval  string
+	pktInterval	   string
+	pktPerProbe	   int
 }
 
 func (h *hostList) String() string {
@@ -84,6 +87,9 @@ func main() {
 	flag.StringVar(&app.tlsKey, "key", "key.pem", "TLS key file")
 	flag.StringVar(&app.tlsCert, "cert", "cert.pem", "TLS cert file")
 	flag.BoolVar(&app.tls, "tls", true, "set to false to disable TLS")
+	flag.StringVar(&app.probeInterval, "probeInterval", "3s", "periodically probe the network and record measurements, in seconds")
+	flag.StringVar(&app.pktInterval, "probePktInterval", "500ms", "define the interval between two icmp packets for each probe run, in milliseconds")
+	flag.IntVar(&app.pktPerProbe, "pktPerProbe", 3, "number of icmp packets send per probe run")
 
 	flag.Parse()
 	if (app.silent) {
@@ -131,6 +137,8 @@ func main() {
 		app.connections, app.defaultPort, app.listeners, app.hosts)
 	log.Printf("reportInterval=%s totalDuration=%s", app.opt.ReportInterval, app.opt.TotalDuration)
 
+	// TODO: how to start off the prober
+
 	if len(app.hosts) == 0 {
 		log.Printf("server mode (use -hosts to switch to client mode)")
 		serve(&app)
@@ -162,4 +170,25 @@ func defaultTimeUnit(s string) string {
 		return s + "s"
 	}
 	return s
+}
+
+func validateProberConfig(probeInterval, pktInterval string, pktPerProbe int) (string, string, int) {
+	if len(probeInterval) < 1 || len(pktInterval) < 1 || pktPerProbe < 1 {
+		// if the input values are invalid, then return default values
+		return "3s", "500ms", 3
+	}
+	var probeIntvl, pktIntvl string
+	if unicode.IsDigit(rune(probeInterval[len(probeInterval)-1])) {
+		probeIntvl = probeInterval + "s"
+	}
+	if unicode.IsDigit(rune(pktInterval[len(pktInterval)-1])) {
+		pktIntvl = pktInterval + "ms"
+	}
+	// make sure the values make sense
+	pktDur, _ := time.ParseDuration(pktInterval)
+	probeDur, _ := time.ParseDuration(probeInterval)
+	if pktDur.Seconds() * float64(pktPerProbe) > probeDur.Seconds() {
+		pktIntvl = fmt.Sprintf("%dms", int(probeDur.Seconds() * 1000 / float64(pktPerProbe)))
+	}
+	return probeIntvl, pktIntvl, pktPerProbe
 }

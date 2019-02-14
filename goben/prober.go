@@ -26,8 +26,8 @@ type ProberConfig struct {
 	source        string        // the server address
 	targets       []string      // the hosts' addresses
 	probeInterval time.Duration // probe probeInterval
-	pktsPerProbe  int           // number of packets sent per probe
 	pktInterval	  time.Duration // packet sending interval
+	pktsPerProbe  int           // number of packets sent per probe
 }
 
 type Prober struct {
@@ -108,10 +108,11 @@ func (p *Prober) send(runID uint16, morePkts chan bool) {
 				log.Println(err.Error())
 				continue
 			}
+			fmt.Println("SEND A ICMP PACKET")
 			morePkts <- true
 		}
 		seq++
-		time.Sleep(time.Duration(p.config.pktInterval) * time.Millisecond)
+		time.Sleep(p.config.pktInterval)
 	}
 	log.Printf("%s: Done sending packets, closing the tracker.", p.config.source)
 	close(morePkts)

@@ -145,6 +145,26 @@ func main() {
 		return
 	}
 
+	// Probe
+	for _, server := range app.listeners {
+		proto := "ip4:icmp" // currently we only handel ipv4 tcp
+		probeInterval, pktInterval, pktPerProbe := validateProberConfig(app.probeInterval, app.pktInterval, app.pktPerProbe)
+		proberConfig := ProberConfig {
+			proto,
+			server,
+			app.hosts,
+			probeInterval,
+			pktInterval,
+			pktPerProbe,
+		}
+		var prober Prober
+		err := prober.Init(proberConfig)
+		if err != nil {
+			log.Panicf("Cannot initialize the prober! %v \n", err.Error())
+		}
+		prober.Start()
+	}
+
 	var proto string
 	if app.udp {
 		proto = "udp"
@@ -172,23 +192,26 @@ func defaultTimeUnit(s string) string {
 	return s
 }
 
-func validateProberConfig(probeInterval, pktInterval string, pktPerProbe int) (string, string, int) {
+func validateProberConfig(probeInterval, pktInterval string, pktPerProbe int) (time.Duration, time.Duration, int) {
 	if len(probeInterval) < 1 || len(pktInterval) < 1 || pktPerProbe < 1 {
 		// if the input values are invalid, then return default values
-		return "3s", "500ms", 3
+		log.Println("WARNING: Invalid prober configuration. Reset to default values.")
+		probeInterval = "3s"
+		pktInterval = "500ms"
+		pktPerProbe = 3
 	}
-	var probeIntvl, pktIntvl string
 	if unicode.IsDigit(rune(probeInterval[len(probeInterval)-1])) {
-		probeIntvl = probeInterval + "s"
+		probeInterval = probeInterval + "s"
 	}
 	if unicode.IsDigit(rune(pktInterval[len(pktInterval)-1])) {
-		pktIntvl = pktInterval + "ms"
+		pktInterval = pktInterval + "ms"
 	}
+
 	// make sure the values make sense
-	pktDur, _ := time.ParseDuration(pktInterval)
-	probeDur, _ := time.ParseDuration(probeInterval)
-	if pktDur.Seconds() * float64(pktPerProbe) > probeDur.Seconds() {
-		pktIntvl = fmt.Sprintf("%dms", int(probeDur.Seconds() * 1000 / float64(pktPerProbe)))
+	pktIntvl, _ := time.ParseDuration(pktInterval)
+	probeIntvl, _ := time.ParseDuration(probeInterval)
+	if pktIntvl.Seconds() * float64(pktPerProbe) > probeIntvl.Seconds() {
+		pktIntvl = time.Duration(probeIntvl.Seconds() * 1000 / float64(pktPerProbe))
 	}
 	return probeIntvl, pktIntvl, pktPerProbe
 }

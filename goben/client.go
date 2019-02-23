@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"sync"
 	"time"
+	"unicode"
 )
 
 func open(app *config) {
@@ -38,7 +39,7 @@ func open(app *config) {
 				log.Printf("open: trying TLS")
 				conn, errDialTLS := tlsDial(proto, hh)
 				if errDialTLS == nil {
-					spawnClient(app, &wg, conn, i, app.connections, true)
+					spawnClient(app, &wg, conn, i, app.connections, true, h)
 					continue
 				}
 				log.Printf("open: trying TLS: failure: %s: %s: %v", proto, hh, errDialTLS)
@@ -53,16 +54,17 @@ func open(app *config) {
 				log.Printf("open: dial %s: %s: %v", proto, hh, errDial)
 				continue
 			}
-			spawnClient(app, &wg, conn, i, app.connections, false)
+			spawnClient(app, &wg, conn, i, app.connections, false, h)
 		}
 	}
 
 	wg.Wait()
 }
 
-func spawnClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections int, isTLS bool) {
+func spawnClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections int, isTLS bool, targetHost string) {
 	wg.Add(1)
 	go handleConnectionClient(app, wg, conn, c, connections, isTLS)
+	go handleMeasurement(app, targetHost)
 }
 
 func tlsDial(proto, h string) (net.Conn, error) {
@@ -195,6 +197,26 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 	log.Printf("handleConnectionClient: closing: %d/%d %v", c, connections, conn.RemoteAddr())
 }
 
+// init and start Prober
+func handleMeasurement(app *config, targetHost string) {
+		proto := "ip4:icmp" // currently we only handel ipv4 tcp
+		probeInterval, pktInterval, pktPerProbe := validateProberConfig(app.probeInterval, app.pktInterval, app.pktPerProbe)
+		proberConfig := ProberConfig {
+			proto,
+			getOutBoundIP(),		 	// default is the local machine's external IP
+			[]string{targetHost},		// hacky way to fit prober.go's API | todo clean up the prober API
+			probeInterval,
+			pktInterval,
+			pktPerProbe,
+		}
+		var prober Prober
+		err := prober.Init(proberConfig)
+		if err != nil {
+			log.Panicf("Cannot initialize the prober! %v \n", err.Error())
+		}
+		prober.Start()
+}
+
 func clientReader(conn net.Conn, c, connections int, done chan struct{}, opt options, stat *ChartData) {
 	log.Printf("clientReader: starting: %d/%d %v", c, connections, conn.RemoteAddr())
 
@@ -309,4 +331,28 @@ func workLoop(conn, label, cpsLabel string, f call, buf []byte, reportInterval t
 	}
 
 	acc.average(start, conn, label, cpsLabel)
+}
+
+func validateProberConfig(probeInterval, pktInterval string, pktPerProbe int) (time.Duration, time.Duration, int) {
+	if len(probeInterval) < 1 || len(pktInterval) < 1 || pktPerProbe < 1 {
+		// if the input values are invalid, then return default values
+		log.Println("WARNING: Invalid prober configuration. Reset to default values.")
+		probeInterval = "3s"
+		pktInterval = "500ms"
+		pktPerProbe = 3
+	}
+	if unicode.IsDigit(rune(probeInterval[len(probeInterval)-1])) {
+		probeInterval = probeInterval + "s"
+	}
+	if unicode.IsDigit(rune(pktInterval[len(pktInterval)-1])) {
+		pktInterval = pktInterval + "ms"
+	}
+
+	// make sure the values make sense
+	pktIntvl, _ := time.ParseDuration(pktInterval)
+	probeIntvl, _ := time.ParseDuration(probeInterval)
+	if pktIntvl.Seconds() * float64(pktPerProbe) > probeIntvl.Seconds() {
+		pktIntvl = time.Duration(probeIntvl.Seconds() * 1000 / float64(pktPerProbe))
+	}
+	return probeIntvl, pktIntvl, pktPerProbe
 }

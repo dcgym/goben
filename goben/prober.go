@@ -12,6 +12,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"os"
 	"sync"
 	"time"
 )
@@ -34,12 +35,22 @@ type Prober struct {
 	config		ProberConfig
 	conn		*icmp.PacketConn	// the ICMP connection
 	runCnt		uint64				// a counter that helps to construct seq# and runId
+	fileLogger  *log.Logger			// logger that will log message to a file
 }
 
 // Initialize a new Prober instance
 // Need to be called before any of the following
 func (p *Prober) Init(config ProberConfig) error {
 	p.config = config
+
+	// prepare logger
+	filePath := fmt.Sprintf("./stats_%v.txt", config.targets[0]) // todo: the file name could be a user input
+	file, err := os.Create(filePath)
+	if err != nil {
+		log.Panicf("Cannot create a logging file to persist network traffic statistics! %v\n", err.Error())
+	}
+	p.fileLogger = log.New(file, "", log.LstdFlags)
+
 	return p.listen()
 }
 
@@ -138,7 +149,7 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 		}
 		senderIP, msg, err := p.packetToRecv(pktbuf)
 		if err != nil {
-			log.Printf("Unmarshalling icmp message Error: %s\n", err.Error())
+			p.fileLogger.Printf("Unmarshalling icmp message Error: %s\n", err.Error())
 			if neterr, ok := err.(*net.OpError); ok && neterr.Timeout() {
 				return
 			}
@@ -146,7 +157,7 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 		target := senderIP.String()
 		echoMsg, ok := msg.Body.(*icmp.Echo)
 		if !ok {
-			log.Println("Got wrong packet in ICMP echo reply.") // should never happen
+			p.fileLogger.Println("Got wrong packet in ICMP echo reply.") // should never happen
 			continue
 		}
 
@@ -155,7 +166,7 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 
 		// check if this packet belong to this run
 		if !matchPacket(runID, echoMsg.ID, echoMsg.Seq) {
-			log.Printf(
+			p.fileLogger.Printf(
 				"Reply from=%s id=%d seq=%d rtt=%s Unmatched packet, probably from the last probe run.\n",
 				target, echoMsg.ID, echoMsg.Seq, rtt)
 			continue
@@ -164,15 +175,15 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 		// check if we have seen this packet before
 		pktID := fmt.Sprintf("%s_%d", target, echoMsg.Seq)
 		if received[pktID] {
-			log.Printf("Duplicate reply from=%s id=%d seq=%d rtt=%s\n", target, echoMsg.ID, echoMsg.Seq, rtt)
+			p.fileLogger.Printf("Duplicate reply from=%s id=%d seq=%d rtt=%s\n", target, echoMsg.ID, echoMsg.Seq, rtt)
 			continue
 		}
 
 		// record the rrt
-		// todo: dump this measure to a file
-		log.Printf("RTT: src=%s, dst=%s, rtt=%s\n", p.config.source, target, rtt)
+		// todo: make this an option that the user can choose to verbosely logging in the console and/or dump to a file
+		p.fileLogger.Printf("RTT: src=%s, dst=%s, rtt=%s\n", p.config.source, target, rtt)
 
-		// bookkeeping
+		// book keeping
 		received[pktID] = true
 		outstandingPkts--
 	}
@@ -258,4 +269,19 @@ func bytesToTime(b []byte) time.Time {
 		nsec += int64(b[i]) << ((timeBytesSize - i - 1) * timeBytesSize)
 	}
 	return time.Unix(0, nsec)
+}
+
+// get hosting machine's external IP address
+func getOutBoundIP() string {
+	// use udp here since it doesn't need to do the three way handshake,
+	// so the destination address doesn't need to be real
+	conn, err := net.Dial("udp", /* Fake Destination */ "8.8.8.8:80")
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+
+	return localAddr.IP.String()
 }

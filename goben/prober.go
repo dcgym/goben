@@ -270,18 +270,3 @@ func bytesToTime(b []byte) time.Time {
 	}
 	return time.Unix(0, nsec)
 }
-
-// get hosting machine's external IP address
-func getOutBoundIP() string {
-	// use udp here since it doesn't need to do the three way handshake,
-	// so the destination address doesn't need to be real
-	conn, err := net.Dial("udp", /* Fake Destination */ "8.8.8.8:80")
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conn.Close()
-
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-
-	return localAddr.IP.String()
-}

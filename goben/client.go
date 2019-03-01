@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -201,9 +202,13 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 func handleMeasurement(app *config, targetHost string) {
 		proto := "ip4:icmp" // currently we only handel ipv4 tcp
 		probeInterval, pktInterval, pktPerProbe := validateProberConfig(app.probeInterval, app.pktInterval, app.pktPerProbe)
+		source, er := os.Hostname()
+		if er != nil {
+			log.Panicf("Cannot resolve the host machine IP. %v", er.Error())
+		}
 		proberConfig := ProberConfig {
 			proto,
-			getOutBoundIP(),		 	// default is the local machine's external IP
+			source,		 	// default is the local machine's external IP
 			[]string{targetHost},		// hacky way to fit prober.go's API | todo clean up the prober API
 			probeInterval,
 			pktInterval,

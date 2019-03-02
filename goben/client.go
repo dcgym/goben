@@ -9,7 +9,6 @@ import (
 	"log"
 	"math/rand"
 	"net"
-	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -202,7 +201,7 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 func handleMeasurement(app *config, targetHost string) {
 		proto := "ip4:icmp" // currently we only handel ipv4 tcp
 		probeInterval, pktInterval, pktPerProbe := validateProberConfig(app.probeInterval, app.pktInterval, app.pktPerProbe)
-		source, er := os.Hostname()
+		source, er := GetSourceIP()
 		if er != nil {
 			log.Panicf("Cannot resolve the host machine IP. %v", er.Error())
 		}

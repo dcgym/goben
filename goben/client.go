@@ -6,6 +6,7 @@ import (
 	"encoding/gob"
 	"fmt"
 	"io"
+	"os"
 	"log"
 	"math/rand"
 	"net"
@@ -201,9 +202,9 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 func handleMeasurement(app *config, targetHost string) {
 		proto := "ip4:icmp" // currently we only handel ipv4 tcp
 		probeInterval, pktInterval, pktPerProbe := validateProberConfig(app.probeInterval, app.pktInterval, app.pktPerProbe)
-		source, er := GetSourceIP()
+		source, er := os.Hostname()
 		if er != nil {
-			log.Panicf("Cannot resolve the host machine IP. %v", er.Error())
+			log.Panicf("Cannot get the host machine hostname. %v", er.Error())
 		}
 		proberConfig := ProberConfig {
 			proto,

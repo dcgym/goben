@@ -61,7 +61,7 @@ func (p *Prober) listen() error {
 		log.Fatalf("The prober from host %s misses configuration info.\n", opts.source)
 	}
 	var err error
-	p.conn, err = icmp.ListenPacket(opts.proto, opts.source)
+	p.conn, err = icmp.ListenPacket(opts.proto, "0.0.0.0") // use 0.0.0.0 here meaning we listen to any packets regardless if the packet is addressed to myself
 	return err
 }
 

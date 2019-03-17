@@ -38,6 +38,7 @@ type config struct {
 	probeInterval  string
 	pktInterval	   string
 	pktPerProbe	   int
+	debug		   bool
 }
 
 func (h *hostList) String() string {
@@ -90,6 +91,7 @@ func main() {
 	flag.StringVar(&app.probeInterval, "probeInterval", "3s", "periodically probe the network and record measurements, in seconds")
 	flag.StringVar(&app.pktInterval, "probePktInterval", "500ms", "define the interval between two icmp packets for each probe run, in milliseconds")
 	flag.IntVar(&app.pktPerProbe, "pktPerProbe", 3, "number of icmp packets send per probe run")
+	flag.BoolVar(&app.debug, "debug", false, "if set to true, will print the process indicator messages in the console to help debugging")
 
 	flag.Parse()
 	if (app.silent) {
@@ -136,8 +138,6 @@ func main() {
 	log.Printf("connections=%d defaultPort=%s listeners=%q hosts=%q",
 		app.connections, app.defaultPort, app.listeners, app.hosts)
 	log.Printf("reportInterval=%s totalDuration=%s", app.opt.ReportInterval, app.opt.TotalDuration)
-
-	// TODO: how to start off the prober
 
 	if len(app.hosts) == 0 {
 		log.Printf("server mode (use -hosts to switch to client mode)")

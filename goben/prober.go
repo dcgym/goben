@@ -6,6 +6,7 @@
 package main
 
 import (
+	"encoding/csv"
 	"fmt"
 	"golang.org/x/net/icmp"
 	"golang.org/x/net/ipv4"
@@ -13,7 +14,9 @@ import (
 	"math/rand"
 	"net"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -29,13 +32,15 @@ type ProberConfig struct {
 	probeInterval time.Duration // probe probeInterval
 	pktInterval	  time.Duration // packet sending interval
 	pktsPerProbe  int           // number of packets sent per probe
+	debug		  bool 			// if true, turn on debugging mode => print lots of messages to console
 }
 
 type Prober struct {
 	config		ProberConfig
 	conn		*icmp.PacketConn	// the ICMP connection
 	runCnt		uint64				// a counter that helps to construct seq# and runId
-	fileLogger  *log.Logger			// logger that will log message to a file
+	result		*csv.Writer			// the csv writer to record measurements
+	file		*os.File			// the csv file descriptor
 }
 
 // Initialize a new Prober instance
@@ -43,13 +48,27 @@ type Prober struct {
 func (p *Prober) Init(config ProberConfig) error {
 	p.config = config
 
-	// prepare logger
-	filePath := fmt.Sprintf("./stats_%v.txt", config.targets[0]) // todo: the file name could be a user input
-	file, err := os.Create(filePath)
+	// prepare csv writer
+	filePath := fmt.Sprintf("./rtt_%v.csv", config.targets[0])
+	header := []string{"dst", "rtt"}
+	writer, file, err := CreateCSV(filePath, header)
 	if err != nil {
 		log.Panicf("Cannot create a logging file to persist network traffic statistics! %v\n", err.Error())
 	}
-	p.fileLogger = log.New(file, "", log.LstdFlags)
+	p.result = writer
+	p.file = file
+
+	// gracefully handle file closing
+	c := make(chan os.Signal, 2)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-c
+		err := closeCSV(p.result, file)
+		if err != nil {
+			log.Printf("Cannot close csv file. %v\n", err.Error())
+		}
+		os.Exit(1)
+	}()
 
 	return p.listen()
 }
@@ -114,18 +133,24 @@ func (p *Prober) send(runID uint16, morePkts chan bool) {
 	seq := runID & uint16(0xff00)
 	for i := 0; i < p.config.pktsPerProbe; i++ {
 		for _, target := range p.config.targets {
-			log.Printf("Request to=%s id=%d seq=%d", target, runID, seq)
+			if p.config.debug {
+				log.Printf("Request to=%s id=%d seq=%d", target, runID, seq)
+			}
 			if _, err := p.conn.WriteTo(p.packetToSend(runID, seq), parseIP(target)); err != nil {
 				log.Println(err.Error())
 				continue
 			}
-			fmt.Println("SEND A ICMP PACKET")
+			if p.config.debug {
+				fmt.Println("SEND A ICMP PACKET")
+			}
 			morePkts <- true
 		}
 		seq++
 		time.Sleep(p.config.pktInterval)
 	}
-	log.Printf("%s: Done sending packets, closing the tracker.", p.config.source)
+	if p.config.debug {
+		log.Printf("%s: Done sending packets, closing the tracker.", p.config.source)
+	}
 	close(morePkts)
 }
 
@@ -149,7 +174,7 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 		}
 		senderIP, msg, err := p.packetToRecv(pktbuf)
 		if err != nil {
-			p.fileLogger.Printf("Unmarshalling icmp message Error: %s\n", err.Error())
+			log.Printf("Unmarshalling icmp message Error: %s\n", err.Error())
 			if neterr, ok := err.(*net.OpError); ok && neterr.Timeout() {
 				return
 			}
@@ -157,7 +182,7 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 		target := senderIP.String()
 		echoMsg, ok := msg.Body.(*icmp.Echo)
 		if !ok {
-			p.fileLogger.Println("Got wrong packet in ICMP echo reply.") // should never happen
+			log.Println("Got wrong packet in ICMP echo reply.") // should never happen
 			continue
 		}
 
@@ -165,8 +190,8 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 		rtt := time.Since(bytesToTime(echoMsg.Data))
 
 		// check if this packet belong to this run
-		if !matchPacket(runID, echoMsg.ID, echoMsg.Seq) {
-			p.fileLogger.Printf(
+		if !matchPacket(runID, echoMsg.ID, echoMsg.Seq) && p.config.debug {
+			log.Printf(
 				"Reply from=%s id=%d seq=%d rtt=%s Unmatched packet, probably from the last probe run.\n",
 				target, echoMsg.ID, echoMsg.Seq, rtt)
 			continue
@@ -174,14 +199,22 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 
 		// check if we have seen this packet before
 		pktID := fmt.Sprintf("%s_%d", target, echoMsg.Seq)
-		if received[pktID] {
-			p.fileLogger.Printf("Duplicate reply from=%s id=%d seq=%d rtt=%s\n", target, echoMsg.ID, echoMsg.Seq, rtt)
+		if received[pktID] && p.config.debug {
+			log.Printf("Duplicate reply from=%s id=%d seq=%d rtt=%s\n", target, echoMsg.ID, echoMsg.Seq, rtt)
 			continue
 		}
 
 		// record the rrt
-		// todo: make this an option that the user can choose to verbosely logging in the console and/or dump to a file
-		p.fileLogger.Printf("RTT: src=%s, dst=%s, rtt=%s\n", p.config.source, target, rtt)
+		if p.config.debug {
+			log.Printf("RTT: src=%s, dst=%s, rtt=%s\n", p.config.source, target, rtt)
+		}
+		entry := make([]string, 2)
+		entry[0] = target
+		entry[1] = rtt.String()
+		writingErr := p.result.Write(entry)
+		if writingErr != nil {
+			log.Panicf("Cannot write to csv file %v", writingErr.Error())
+		}
 
 		// book keeping
 		received[pktID] = true
@@ -203,7 +236,9 @@ func (p *Prober) runProbe() {
 	}()
 	p.send(runID, morePkts)
 	wg.Wait()
-	log.Printf("The prober from host %s finished!\n", p.config.source)
+	if p.config.debug {
+		log.Printf("The prober from host %s finished!\n", p.config.source)
+	}
 }
 
 // Start starts the prober and perform a probe for each probeInterval

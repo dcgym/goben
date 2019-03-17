@@ -4,16 +4,17 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/gob"
+	"errors"
 	"fmt"
 	"io"
-	"os"
 	"log"
 	"math/rand"
 	"net"
+	"os"
 	"runtime"
+	"strconv"
 	"sync"
 	"time"
-	"unicode"
 )
 
 func open(app *config) {
@@ -63,9 +64,9 @@ func open(app *config) {
 }
 
 func spawnClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections int, isTLS bool, targetHost string) {
-	wg.Add(1)
+	wg.Add(2)
 	go handleConnectionClient(app, wg, conn, c, connections, isTLS)
-	go handleMeasurement(app, targetHost)
+	go handleMeasurement(app, targetHost, wg)
 }
 
 func tlsDial(proto, h string) (net.Conn, error) {
@@ -152,12 +153,7 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 		go clientWriter(conn, c, connections, doneWriter, opt, output)
 	}
 
-	tickerPeriod := time.NewTimer(app.opt.TotalDuration)
-
-	<-tickerPeriod.C
-	log.Printf("handleConnectionClient: %v timer", app.opt.TotalDuration)
-
-	tickerPeriod.Stop()
+	startTicker(app.opt.TotalDuration)
 
 	conn.Close() // force reader/writer to quit
 
@@ -199,9 +195,14 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 }
 
 // init and start Prober
-func handleMeasurement(app *config, targetHost string) {
+func handleMeasurement(app *config, targetHost string, wg *sync.WaitGroup) {
+		defer wg.Done()
+
 		proto := "ip4:icmp" // currently we only handel ipv4 tcp
-		probeInterval, pktInterval, pktPerProbe := validateProberConfig(app.probeInterval, app.pktInterval, app.pktPerProbe)
+		pktInterval, probeInterval, validationErr := validateProberConfig(app.probeInterval, app.pktInterval, app.pktPerProbe)
+		if validationErr != nil {
+			log.Panicf("ProbeConfig: %v", validationErr.Error())
+		}
 		source, er := os.Hostname()
 		if er != nil {
 			log.Panicf("Cannot get the host machine hostname. %v", er.Error())
@@ -212,14 +213,23 @@ func handleMeasurement(app *config, targetHost string) {
 			[]string{targetHost},		// hacky way to fit prober.go's API | todo clean up the prober API
 			probeInterval,
 			pktInterval,
-			pktPerProbe,
+			app.pktPerProbe,
+			app.debug,
 		}
 		var prober Prober
 		err := prober.Init(proberConfig)
 		if err != nil {
 			log.Panicf("Cannot initialize the prober! %v \n", err.Error())
 		}
-		prober.Start()
+
+		go prober.Start()
+
+		startTicker(app.opt.TotalDuration)
+
+		csvErr := closeCSV(prober.result, prober.file)
+		if csvErr != nil {
+			log.Panicf("Cannot close the csv file: %v \n", csvErr.Error())
+		}
 }
 
 func clientReader(conn net.Conn, c, connections int, done chan struct{}, opt options, stat *ChartData) {
@@ -338,18 +348,17 @@ func workLoop(conn, label, cpsLabel string, f call, buf []byte, reportInterval t
 	acc.average(start, conn, label, cpsLabel)
 }
 
-func validateProberConfig(probeInterval, pktInterval string, pktPerProbe int) (time.Duration, time.Duration, int) {
+func validateProberConfig(probeInterval, pktInterval string, pktPerProbe int) (time.Duration, time.Duration, error) {
+	dummy := time.Second // dummy return value when there is error
 	if len(probeInterval) < 1 || len(pktInterval) < 1 || pktPerProbe < 1 {
-		// if the input values are invalid, then return default values
-		log.Println("WARNING: Invalid prober configuration. Reset to default values.")
-		probeInterval = "3s"
-		pktInterval = "500ms"
-		pktPerProbe = 3
+		// input values are missing or incomplete
+		return dummy, dummy, errors.New("prober configuration: at least one of the probeInterval or pktInterval or pktPerProbe is missing")
 	}
-	if unicode.IsDigit(rune(probeInterval[len(probeInterval)-1])) {
+	// auto append time unit if the user miss it
+	if _, err := strconv.Atoi(probeInterval); err == nil {
 		probeInterval = probeInterval + "s"
 	}
-	if unicode.IsDigit(rune(pktInterval[len(pktInterval)-1])) {
+	if _, err := strconv.Atoi(pktInterval); err == nil {
 		pktInterval = pktInterval + "ms"
 	}
 
@@ -357,7 +366,17 @@ func validateProberConfig(probeInterval, pktInterval string, pktPerProbe int) (t
 	pktIntvl, _ := time.ParseDuration(pktInterval)
 	probeIntvl, _ := time.ParseDuration(probeInterval)
 	if pktIntvl.Seconds() * float64(pktPerProbe) > probeIntvl.Seconds() {
-		pktIntvl = time.Duration(probeIntvl.Seconds() * 1000 / float64(pktPerProbe))
+		return dummy, dummy, fmt.Errorf("pktInterval: %v, probeInterval: %v, pktPerProbe: %v. Too many packets for given probe interval", pktIntvl, probeInterval,pktPerProbe)
 	}
-	return probeIntvl, pktIntvl, pktPerProbe
+	return pktIntvl, probeIntvl, nil
+}
+
+// Control totalDuration: start the timer that will tick the given duration time
+func startTicker(duration time.Duration) {
+	tickerPeriod := time.NewTimer(duration)
+
+	<-tickerPeriod.C
+	log.Printf("Connection lasts: %v timer", duration)
+
+	tickerPeriod.Stop()
 }

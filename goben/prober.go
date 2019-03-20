@@ -28,7 +28,7 @@ const (
 type ProberConfig struct {
 	proto         string        // the protocol for the ICMP packet connection (ie. ip4:icmp, ip4:1, ip6:58 ...)
 	source        string        // the server address
-	targets       []string      // the hosts' addresses
+	target       string      	// the host' addresses
 	probeInterval time.Duration // probe probeInterval
 	pktInterval	  time.Duration // packet sending interval
 	pktsPerProbe  int           // number of packets sent per probe
@@ -49,7 +49,7 @@ func (p *Prober) Init(config ProberConfig) error {
 	p.config = config
 
 	// prepare csv writer
-	filePath := fmt.Sprintf("./rtt_%v.csv", config.targets[0])
+	filePath := fmt.Sprintf("./rtt_%v.csv", config.target)
 	header := []string{"dst", "rtt"}
 	writer, file, err := CreateCSV(filePath, header)
 	if err != nil {
@@ -132,19 +132,18 @@ func (p *Prober) packetToRecv(pktbuf []byte) (net.IP, *icmp.Message, error) {
 func (p *Prober) send(runID uint16, morePkts chan bool) {
 	seq := runID & uint16(0xff00)
 	for i := 0; i < p.config.pktsPerProbe; i++ {
-		for _, target := range p.config.targets {
-			if p.config.debug {
-				log.Printf("Request to=%s id=%d seq=%d", target, runID, seq)
-			}
-			if _, err := p.conn.WriteTo(p.packetToSend(runID, seq), parseIP(target)); err != nil {
-				log.Println(err.Error())
-				continue
-			}
-			if p.config.debug {
-				fmt.Println("SEND A ICMP PACKET")
-			}
-			morePkts <- true
+		target := p.config.target
+		if p.config.debug {
+			log.Printf("Request to=%s id=%d seq=%d", target, runID, seq)
 		}
+		if _, err := p.conn.WriteTo(p.packetToSend(runID, seq), parseIP(target)); err != nil {
+			log.Println(err.Error())
+			continue
+		}
+		if p.config.debug {
+			fmt.Println("SEND A ICMP PACKET")
+		}
+		morePkts <- true
 		seq++
 		time.Sleep(p.config.pktInterval)
 	}
@@ -210,7 +209,7 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 		}
 		entry := make([]string, 2)
 		entry[0] = target
-		entry[1] = rtt.String()
+		entry[1] = rtt.Round(time.Millisecond).String() // round to millisecond
 		writingErr := p.result.Write(entry)
 		if writingErr != nil {
 			log.Panicf("Cannot write to csv file %v", writingErr.Error())
@@ -229,7 +228,7 @@ func (p *Prober) runProbe() {
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
 	// morePtks is a channel used to let the receiver know when there are no more packets
-	morePkts := make(chan bool, int(p.config.pktsPerProbe * len(p.config.targets)))
+	morePkts := make(chan bool, int(p.config.pktsPerProbe))
 	go func() {
 		defer wg.Done()
 		p.recv(runID, morePkts)

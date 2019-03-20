@@ -210,7 +210,7 @@ func handleMeasurement(app *config, targetHost string, wg *sync.WaitGroup) {
 		proberConfig := ProberConfig {
 			proto,
 			source,		 	// default is the local machine's external IP
-			[]string{targetHost},		// hacky way to fit prober.go's API | todo clean up the prober API
+			targetHost,
 			probeInterval,
 			pktInterval,
 			app.pktPerProbe,

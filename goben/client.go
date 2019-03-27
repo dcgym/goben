@@ -66,7 +66,7 @@ func open(app *config) {
 func spawnClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections int, isTLS bool, targetHost string) {
 	wg.Add(2)
 	go handleConnectionClient(app, wg, conn, c, connections, isTLS)
-	go handleMeasurement(app, targetHost, wg)
+	go handleMeasurement(app, targetHost, wg, c)
 }
 
 func tlsDial(proto, h string) (net.Conn, error) {
@@ -143,7 +143,7 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 	var input *ChartData
 	var output *ChartData
 
-	if app.csv != "" || app.export != "" || app.chart != "" || app.ascii {
+	if (app.csv != "" && app.totalDuration != "inf") || app.export != "" || app.chart != "" || app.ascii {
 		input = &info.Input
 		output = &info.Output
 	}
@@ -162,7 +162,7 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 		<-doneWriter // wait writer exit
 	}
 
-	if app.csv != "" {
+	if app.csv != "" && app.totalDuration != "inf" {
 		filename := fmt.Sprintf(app.csv, c, conn.RemoteAddr())
 		log.Printf("exporting CSV test results to: %s", filename)
 		errExport := exportCsv(filename, &info)
@@ -195,7 +195,7 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 }
 
 // init and start Prober
-func handleMeasurement(app *config, targetHost string, wg *sync.WaitGroup) {
+func handleMeasurement(app *config, targetHost string, wg *sync.WaitGroup, connIndex int) {
 		defer wg.Done()
 
 		proto := "ip4:icmp" // currently we only handel ipv4 tcp
@@ -215,6 +215,8 @@ func handleMeasurement(app *config, targetHost string, wg *sync.WaitGroup) {
 			pktInterval,
 			app.pktPerProbe,
 			app.debug,
+			app.csv,
+			connIndex,
 		}
 		var prober Prober
 		err := prober.Init(proberConfig)

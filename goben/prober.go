@@ -33,6 +33,8 @@ type ProberConfig struct {
 	pktInterval	  time.Duration // packet sending interval
 	pktsPerProbe  int           // number of packets sent per probe
 	debug		  bool 			// if true, turn on debugging mode => print lots of messages to console
+	csv	  		  string		// if true, export the latency measurement to csv file
+	connIndex	  int			// parallel connection index to host
 }
 
 type Prober struct {
@@ -49,26 +51,28 @@ func (p *Prober) Init(config ProberConfig) error {
 	p.config = config
 
 	// prepare csv writer
-	filePath := fmt.Sprintf("./rtt_%v.csv", config.target)
-	header := []string{"dst", "rtt"}
-	writer, file, err := CreateCSV(filePath, header)
-	if err != nil {
-		log.Panicf("Cannot create a logging file to persist network traffic statistics! %v\n", err.Error())
-	}
-	p.result = writer
-	p.file = file
-
-	// gracefully handle file closing
-	c := make(chan os.Signal, 2)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		<-c
-		err := closeCSV(p.result, file)
+	if p.config.csv != "" {
+		filePath := fmt.Sprintf(p.config.csv, p.config.connIndex, p.config.target)
+		header := []string{"dst", "rtt"}
+		writer, file, err := CreateCSV(filePath, header)
 		if err != nil {
-			log.Printf("Cannot close csv file. %v\n", err.Error())
+			log.Panicf("Cannot create a logging file to persist network traffic statistics! %v\n", err.Error())
 		}
-		os.Exit(1)
-	}()
+		p.result = writer
+		p.file = file
+
+		// gracefully handle file closing
+		c := make(chan os.Signal, 2)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+		go func() {
+			<-c
+			err := closeCSV(p.result, file)
+			if err != nil {
+				log.Printf("Cannot close csv file. %v\n", err.Error())
+			}
+			os.Exit(1)
+		}()
+	}
 
 	return p.listen()
 }
@@ -207,12 +211,15 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 		if p.config.debug {
 			log.Printf("RTT: src=%s, dst=%s, rtt=%s\n", p.config.source, target, rtt)
 		}
-		entry := make([]string, 2)
-		entry[0] = target
-		entry[1] = rtt.Round(time.Millisecond).String() // round to millisecond
-		writingErr := p.result.Write(entry)
-		if writingErr != nil {
-			log.Panicf("Cannot write to csv file %v", writingErr.Error())
+
+		if p.config.csv != "" {
+			entry := make([]string, 2)
+			entry[0] = target
+			entry[1] = fmt.Sprintf("%vms", float64(rtt) / float64(time.Millisecond)) // round to millisecond
+			writingErr := p.result.Write(entry)
+			if writingErr != nil {
+				log.Panicf("Cannot write to csv file %v", writingErr.Error())
+			}
 		}
 
 		// book keeping

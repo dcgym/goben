@@ -63,7 +63,7 @@ func (p *Prober) Init(config ProberConfig) error {
 
 		// gracefully handle file closing
 		c := make(chan os.Signal, 2)
-		signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+		signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 		go func() {
 			<-c
 			err := closeCSV(p.result, file)
@@ -215,7 +215,7 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 		if p.config.csv != "" {
 			entry := make([]string, 2)
 			entry[0] = target
-			entry[1] = fmt.Sprintf("%vms", float64(rtt) / float64(time.Millisecond)) // round to millisecond
+			entry[1] = fmt.Sprintf("%v", rtt.Nanoseconds()) // round to millisecond
 			writingErr := p.result.Write(entry)
 			if writingErr != nil {
 				log.Panicf("Cannot write to csv file %v", writingErr.Error())

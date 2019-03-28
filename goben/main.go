@@ -35,9 +35,6 @@ type config struct {
 	tlsCert        string
 	tlsKey         string
 	tls            bool
-	probeInterval  string
-	pktInterval	   string
-	pktPerProbe	   int
 	debug		   bool
 }
 
@@ -88,9 +85,6 @@ func main() {
 	flag.StringVar(&app.tlsKey, "key", "key.pem", "TLS key file")
 	flag.StringVar(&app.tlsCert, "cert", "cert.pem", "TLS cert file")
 	flag.BoolVar(&app.tls, "tls", true, "set to false to disable TLS")
-	flag.StringVar(&app.probeInterval, "probeInterval", "3s", "periodically probe the network and record measurements, in seconds")
-	flag.StringVar(&app.pktInterval, "probePktInterval", "500ms", "define the interval between two icmp packets for each probe run, in milliseconds")
-	flag.IntVar(&app.pktPerProbe, "pktPerProbe", 3, "number of icmp packets send per probe run")
 	flag.BoolVar(&app.debug, "debug", false, "if set to true, will print the process indicator messages in the console to help debugging")
 
 	flag.Parse()

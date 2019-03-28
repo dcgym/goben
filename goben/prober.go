@@ -6,6 +6,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"encoding/csv"
 	"fmt"
 	"golang.org/x/net/icmp"
@@ -23,15 +24,15 @@ import (
 const (
 	timeBytesSize = 8
 	protocolICMP  = 1
+	probeInterval= 3000 * time.Millisecond // probe interval in milliseconds
+	pktInterval	= 500 * time.Millisecond // packet sending interval in milliseconds
+	pktsPerProbe = 5           // number of packets sent per probe
 )
 
 type ProberConfig struct {
 	proto         string        // the protocol for the ICMP packet connection (ie. ip4:icmp, ip4:1, ip6:58 ...)
 	source        string        // the server address
 	target       string      	// the host' addresses
-	probeInterval time.Duration // probe probeInterval
-	pktInterval	  time.Duration // packet sending interval
-	pktsPerProbe  int           // number of packets sent per probe
 	debug		  bool 			// if true, turn on debugging mode => print lots of messages to console
 	csv	  		  string		// if true, export the latency measurement to csv file
 	connIndex	  int			// parallel connection index to host
@@ -45,11 +46,12 @@ type Prober struct {
 	file		*os.File			// the csv file descriptor
 }
 
+
 // Initialize a new Prober instance
 // Need to be called before any of the following
 func (p *Prober) Init(config ProberConfig) error {
 	p.config = config
-
+	validateProberConfig()
 	// prepare csv writer
 	if p.config.csv != "" {
 		filePath := fmt.Sprintf(p.config.csv, p.config.connIndex, p.config.target)
@@ -77,6 +79,15 @@ func (p *Prober) Init(config ProberConfig) error {
 	return p.listen()
 }
 
+func validateProberConfig() {
+	// auto append time unit if the user miss it
+	// make sure the values make sense
+	if pktInterval.Seconds() * float64(pktsPerProbe) > probeInterval.Seconds() {
+		fmt.Errorf("pktInterval: %v, probeInterval: %v, pktPerProbe: %v. Too many packets for given probe interval", pktInterval, probeInterval, pktsPerProbe)
+		os.Exit(1)
+	}
+}
+
 // create a new icmp connection to listen to in coming packets
 func (p *Prober) listen() error {
 	opts := p.config
@@ -86,6 +97,34 @@ func (p *Prober) listen() error {
 	var err error
 	p.conn, err = icmp.ListenPacket(opts.proto, "0.0.0.0") // use 0.0.0.0 here meaning we listen to any packets regardless if the packet is addressed to myself
 	return err
+}
+
+// TimeStamp - Base type for echo request/reply with timestamps
+type TimeStamp struct {
+	ID       uint16
+	Seq uint16
+	OriginateTimestamp uint32
+	ReceiveTimestamp   uint32
+	TransmitTimestamp  uint32
+}
+
+// Len implements the Len method of MessageBody interface.
+func (p *TimeStamp) Len(proto int) int {
+	if p == nil {
+		return 0
+	}
+	return 16
+}
+
+// Marshal implements the Marshal method of MessageBody interface.
+func (p *TimeStamp) Marshal(proto int) ([]byte, error) {
+	b := make([]byte, 16)
+	binary.BigEndian.PutUint16(b[:2], uint16(p.ID))
+	binary.BigEndian.PutUint16(b[2:4], uint16(p.Seq))
+	binary.BigEndian.PutUint32(b[4:8], uint32(p.OriginateTimestamp))
+	binary.BigEndian.PutUint32(b[8:12], uint32(p.ReceiveTimestamp))
+	binary.BigEndian.PutUint32(b[12:16], uint32(p.TransmitTimestamp))
+	return b, nil
 }
 
 // construct the ICMP message and marshall it to bytes
@@ -135,7 +174,7 @@ func (p *Prober) packetToRecv(pktbuf []byte) (net.IP, *icmp.Message, error) {
 // We sent the icmp packets synchronously
 func (p *Prober) send(runID uint16, morePkts chan bool) {
 	seq := runID & uint16(0xff00)
-	for i := 0; i < p.config.pktsPerProbe; i++ {
+	for i := 0; i < pktsPerProbe; i++ {
 		target := p.config.target
 		if p.config.debug {
 			log.Printf("Request to=%s id=%d seq=%d", target, runID, seq)
@@ -149,7 +188,7 @@ func (p *Prober) send(runID uint16, morePkts chan bool) {
 		}
 		morePkts <- true
 		seq++
-		time.Sleep(p.config.pktInterval)
+		time.Sleep(pktInterval)
 	}
 	if p.config.debug {
 		log.Printf("%s: Done sending packets, closing the tracker.", p.config.source)
@@ -235,7 +274,7 @@ func (p *Prober) runProbe() {
 	wg := new(sync.WaitGroup)
 	wg.Add(1)
 	// morePtks is a channel used to let the receiver know when there are no more packets
-	morePkts := make(chan bool, int(p.config.pktsPerProbe))
+	morePkts := make(chan bool, int(pktsPerProbe))
 	go func() {
 		defer wg.Done()
 		p.recv(runID, morePkts)
@@ -254,7 +293,7 @@ func (p *Prober) Start() {
 		log.Panicf("The prober from host %s is not properly initialized.\n", p.config.source)
 	}
 	defer p.conn.Close()
-	for range time.Tick(p.config.probeInterval) {
+	for range time.Tick(probeInterval) {
 		p.runProbe()
 	}
 }

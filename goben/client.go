@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/tls"
 	"encoding/gob"
-	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -12,7 +11,6 @@ import (
 	"net"
 	"os"
 	"runtime"
-	"strconv"
 	"sync"
 	"time"
 )
@@ -199,10 +197,6 @@ func handleMeasurement(app *config, targetHost string, wg *sync.WaitGroup, connI
 		defer wg.Done()
 
 		proto := "ip4:icmp" // currently we only handel ipv4 tcp
-		pktInterval, probeInterval, validationErr := validateProberConfig(app.probeInterval, app.pktInterval, app.pktPerProbe)
-		if validationErr != nil {
-			log.Panicf("ProbeConfig: %v", validationErr.Error())
-		}
 		source, er := os.Hostname()
 		if er != nil {
 			log.Panicf("Cannot get the host machine hostname. %v", er.Error())
@@ -211,9 +205,6 @@ func handleMeasurement(app *config, targetHost string, wg *sync.WaitGroup, connI
 			proto,
 			source,		 	// default is the local machine's external IP
 			targetHost,
-			probeInterval,
-			pktInterval,
-			app.pktPerProbe,
 			app.debug,
 			app.csv,
 			connIndex,
@@ -348,29 +339,6 @@ func workLoop(conn, label, cpsLabel string, f call, buf []byte, reportInterval t
 	}
 
 	acc.average(start, conn, label, cpsLabel)
-}
-
-func validateProberConfig(probeInterval, pktInterval string, pktPerProbe int) (time.Duration, time.Duration, error) {
-	dummy := time.Second // dummy return value when there is error
-	if len(probeInterval) < 1 || len(pktInterval) < 1 || pktPerProbe < 1 {
-		// input values are missing or incomplete
-		return dummy, dummy, errors.New("prober configuration: at least one of the probeInterval or pktInterval or pktPerProbe is missing")
-	}
-	// auto append time unit if the user miss it
-	if _, err := strconv.Atoi(probeInterval); err == nil {
-		probeInterval = probeInterval + "s"
-	}
-	if _, err := strconv.Atoi(pktInterval); err == nil {
-		pktInterval = pktInterval + "ms"
-	}
-
-	// make sure the values make sense
-	pktIntvl, _ := time.ParseDuration(pktInterval)
-	probeIntvl, _ := time.ParseDuration(probeInterval)
-	if pktIntvl.Seconds() * float64(pktPerProbe) > probeIntvl.Seconds() {
-		return dummy, dummy, fmt.Errorf("pktInterval: %v, probeInterval: %v, pktPerProbe: %v. Too many packets for given probe interval", pktIntvl, probeInterval,pktPerProbe)
-	}
-	return pktIntvl, probeIntvl, nil
 }
 
 // Control totalDuration: start the timer that will tick the given duration time

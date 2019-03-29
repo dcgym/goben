@@ -35,6 +35,7 @@ type config struct {
 	tlsCert        string
 	tlsKey         string
 	tls            bool
+	debug		   bool
 }
 
 func (h *hostList) String() string {
@@ -84,6 +85,7 @@ func main() {
 	flag.StringVar(&app.tlsKey, "key", "key.pem", "TLS key file")
 	flag.StringVar(&app.tlsCert, "cert", "cert.pem", "TLS cert file")
 	flag.BoolVar(&app.tls, "tls", true, "set to false to disable TLS")
+	flag.BoolVar(&app.debug, "debug", false, "if set to true, will print the process indicator messages in the console to help debugging")
 
 	flag.Parse()
 	if (app.silent) {

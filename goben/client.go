@@ -9,6 +9,7 @@ import (
 	"log"
 	"math/rand"
 	"net"
+	"os"
 	"runtime"
 	"sync"
 	"time"
@@ -38,7 +39,7 @@ func open(app *config) {
 				log.Printf("open: trying TLS")
 				conn, errDialTLS := tlsDial(proto, hh)
 				if errDialTLS == nil {
-					spawnClient(app, &wg, conn, i, app.connections, true)
+					spawnClient(app, &wg, conn, i, app.connections, true, h)
 					continue
 				}
 				log.Printf("open: trying TLS: failure: %s: %s: %v", proto, hh, errDialTLS)
@@ -53,16 +54,17 @@ func open(app *config) {
 				log.Printf("open: dial %s: %s: %v", proto, hh, errDial)
 				continue
 			}
-			spawnClient(app, &wg, conn, i, app.connections, false)
+			spawnClient(app, &wg, conn, i, app.connections, false, h)
 		}
 	}
 
 	wg.Wait()
 }
 
-func spawnClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections int, isTLS bool) {
-	wg.Add(1)
+func spawnClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections int, isTLS bool, targetHost string) {
+	wg.Add(2)
 	go handleConnectionClient(app, wg, conn, c, connections, isTLS)
+	go handleMeasurement(app, targetHost, wg, c)
 }
 
 func tlsDial(proto, h string) (net.Conn, error) {
@@ -139,7 +141,7 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 	var input *ChartData
 	var output *ChartData
 
-	if app.csv != "" || app.export != "" || app.chart != "" || app.ascii {
+	if (app.csv != "" && app.totalDuration != "inf") || app.export != "" || app.chart != "" || app.ascii {
 		input = &info.Input
 		output = &info.Output
 	}
@@ -149,12 +151,7 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 		go clientWriter(conn, c, connections, doneWriter, opt, output)
 	}
 
-	tickerPeriod := time.NewTimer(app.opt.TotalDuration)
-
-	<-tickerPeriod.C
-	log.Printf("handleConnectionClient: %v timer", app.opt.TotalDuration)
-
-	tickerPeriod.Stop()
+	startTicker(app.opt.TotalDuration)
 
 	conn.Close() // force reader/writer to quit
 
@@ -163,7 +160,7 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 		<-doneWriter // wait writer exit
 	}
 
-	if app.csv != "" {
+	if app.csv != "" && app.totalDuration != "inf" {
 		filename := fmt.Sprintf(app.csv, c, conn.RemoteAddr())
 		log.Printf("exporting CSV test results to: %s", filename)
 		errExport := exportCsv(filename, &info)
@@ -193,6 +190,41 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 	plotascii(&info, conn.RemoteAddr().String(), c)
 
 	log.Printf("handleConnectionClient: closing: %d/%d %v", c, connections, conn.RemoteAddr())
+}
+
+// init and start Prober
+func handleMeasurement(app *config, targetHost string, wg *sync.WaitGroup, connIndex int) {
+		defer wg.Done()
+
+		proto := "ip4:icmp" // currently we only handel ipv4 tcp
+		source, er := os.Hostname()
+		if er != nil {
+			log.Panicf("Cannot get the host machine hostname. %v", er.Error())
+		}
+		proberConfig := ProberConfig {
+			proto,
+			source,		 	// default is the local machine's external IP
+			targetHost,
+			app.debug,
+			app.csv,
+			connIndex,
+		}
+		var prober Prober
+		err := prober.Init(proberConfig)
+		if err != nil {
+			log.Panicf("Cannot initialize the prober! %v \n", err.Error())
+		}
+
+		go prober.Start()
+
+		startTicker(app.opt.TotalDuration)
+
+		if app.csv != "" {
+			csvErr := closeCSV(prober.result, prober.file)
+			if csvErr != nil {
+				log.Panicf("Cannot close the csv file: %v \n", csvErr.Error())
+			}
+		}
 }
 
 func clientReader(conn net.Conn, c, connections int, done chan struct{}, opt options, stat *ChartData) {
@@ -309,4 +341,14 @@ func workLoop(conn, label, cpsLabel string, f call, buf []byte, reportInterval t
 	}
 
 	acc.average(start, conn, label, cpsLabel)
+}
+
+// Control totalDuration: start the timer that will tick the given duration time
+func startTicker(duration time.Duration) {
+	tickerPeriod := time.NewTimer(duration)
+
+	<-tickerPeriod.C
+	log.Printf("Connection lasts: %v timer", duration)
+
+	tickerPeriod.Stop()
 }

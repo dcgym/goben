@@ -219,9 +219,11 @@ func handleMeasurement(app *config, targetHost string, wg *sync.WaitGroup, connI
 
 		startTicker(app.opt.TotalDuration)
 
-		csvErr := closeCSV(prober.result, prober.file)
-		if csvErr != nil {
-			log.Panicf("Cannot close the csv file: %v \n", csvErr.Error())
+		if app.csv != "" {
+			csvErr := closeCSV(prober.result, prober.file)
+			if csvErr != nil {
+				log.Panicf("Cannot close the csv file: %v \n", csvErr.Error())
+			}
 		}
 }
 

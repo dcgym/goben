@@ -26,7 +26,7 @@ const (
 	protocolICMP  = 1
 	probeInterval= 3000 * time.Millisecond // probe interval in milliseconds
 	pktInterval	= 500 * time.Millisecond // packet sending interval in milliseconds
-	pktsPerProbe = 5           // number of packets sent per probe
+	pktsPerProbe = 2           // number of packets sent per probe
 )
 
 type ProberConfig struct {
@@ -220,6 +220,9 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 			if neterr, ok := err.(*net.OpError); ok && neterr.Timeout() {
 				return
 			}
+		}
+		if (msg.Type != ipv4.ICMPTypeEchoReply) {
+			continue
 		}
 		target := senderIP.String()
 		echoMsg, ok := msg.Body.(*icmp.Echo)

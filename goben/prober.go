@@ -24,9 +24,9 @@ import (
 const (
 	timeBytesSize = 8
 	protocolICMP  = 1
-	probeInterval= 3000 * time.Millisecond // probe interval in milliseconds
-	pktInterval	= 500 * time.Millisecond // packet sending interval in milliseconds
-	pktsPerProbe = 2           // number of packets sent per probe
+	probeInterval= 1000 * time.Millisecond // probe interval in milliseconds
+	pktInterval	= 300 * time.Millisecond // packet sending interval in milliseconds
+	pktsPerProbe = 3           // number of packets sent per probe
 )
 
 type ProberConfig struct {

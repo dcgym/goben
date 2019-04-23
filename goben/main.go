@@ -36,7 +36,6 @@ type config struct {
 	tlsKey         string
 	tls            bool
 	debug		   bool
-	totalFlow	   uint64
 }
 
 func (h *hostList) String() string {
@@ -87,7 +86,7 @@ func main() {
 	flag.StringVar(&app.tlsCert, "cert", "cert.pem", "TLS cert file")
 	flag.BoolVar(&app.tls, "tls", true, "set to false to disable TLS")
 	flag.BoolVar(&app.debug, "debug", false, "if set to true, will print the process indicator messages in the console to help debugging")
-	flag.Uint64Var(&app.totalFlow, "totalFlow", 0, "test bandwidth/latency by given total amount of data transmitted over each connection\ndata unit defaults to kB, totalDuration flag will be disabled")
+	flag.Uint64Var(&app.opt.TotalFlow, "totalFlow", 0, "test bandwidth/latency by given total amount of data transmitted over each connection\ndata unit defaults to kB, totalDuration flag will be disabled")
 
 	flag.Parse()
 	if (app.silent) {

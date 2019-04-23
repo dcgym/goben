@@ -65,7 +65,7 @@ func spawnClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections 
 	wg.Add(1)
 	go handleConnectionClient(app, wg, conn, c, connections, isTLS)
 	// turn off rtt measurement when measuring fixed flow completion time
-	if app.totalFlow == 0 {
+	if app.opt.TotalFlow == 0 {
 		wg.Add(1)
 		go handleMeasurement(app, targetHost, wg, c)
 	}
@@ -146,17 +146,17 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 	var input *ChartData
 	var output *ChartData
 
-	if (app.csv != "" && app.totalDuration != "inf" && app.totalFlow == 0) || app.export != "" || app.chart != "" || app.ascii {
+	if (app.csv != "" && app.totalDuration != "inf" && opt.TotalFlow == 0) || app.export != "" || app.chart != "" || app.ascii {
 		input = &info.Input
 		output = &info.Output
 	}
 
-	go clientReader(conn, c, connections, doneReader, opt, input, app.totalFlow)
+	go clientReader(conn, c, connections, doneReader, opt, input, opt.TotalFlow)
 	if !app.passiveClient {
-		go clientWriter(conn, c, connections, doneWriter, opt, output, app.totalFlow)
+		go clientWriter(conn, c, connections, doneWriter, opt, output, opt.TotalFlow)
 	}
 
-	if app.totalFlow == 0 {
+	if opt.TotalFlow == 0 {
 		startTicker(app.opt.TotalDuration)
 		// clean up client
 		conn.Close() // force reader/writer to quit

@@ -131,7 +131,7 @@ func handleTCP(app *config, wg *sync.WaitGroup, listener net.Listener, isTLS boo
 			log.Printf("handle: accept: %v", errAccept)
 			break
 		}
-		go handleConnection(app, conn, id, 0, isTLS)
+		go handleConnection(conn, id, 0, isTLS)
 		id++
 	}
 }
@@ -209,7 +209,7 @@ func handleUDP(app *config, wg *sync.WaitGroup, conn *net.UDPConn) {
 	}
 }
 
-func handleConnection(app *config, conn net.Conn, c, connections int, isTLS bool) {
+func handleConnection(conn net.Conn, c, connections int, isTLS bool) {
 	defer conn.Close()
 
 	log.Printf("handleConnection: incoming: %s %v", protoLabel(isTLS), conn.RemoteAddr())
@@ -233,13 +233,13 @@ func handleConnection(app *config, conn net.Conn, c, connections int, isTLS bool
 	var wg sync.WaitGroup
 
 	wg.Add(1)
-	go serverReader(conn, opt, c, connections, isTLS, &wg, app.totalFlow)
+	go serverReader(conn, opt, c, connections, isTLS, &wg, opt.TotalFlow)
 
 	if !opt.PassiveServer {
 		go serverWriter(conn, opt, c, connections, isTLS)
 	}
 
-	if app.totalFlow == 0 {
+	if opt.TotalFlow == 0 {
 		tickerPeriod := time.NewTimer(opt.TotalDuration)
 
 		<-tickerPeriod.C

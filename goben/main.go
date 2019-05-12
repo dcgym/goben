@@ -80,7 +80,7 @@ func main() {
 	flag.StringVar(&app.chart, "chart", "", "output filename for rendering chart on client\n'%d' is parallel connection index to host\n'%s' is hostname:port\nexample: -chart chart-%d-%s.png")
 	flag.StringVar(&app.export, "export", "", "output filename for YAML exporting test results on client\n'%d' is parallel connection index to host\n'%s' is hostname:port\nexample: -export export-%d-%s.yaml")
 	flag.StringVar(&app.csv, "csv", "", "output filename for CSV exporting test results on client\n'%d' is parallel connection index to host\n'%s' is hostname:port\nexample: -csv export-%d-%s.csv")
-	flag.BoolVar(&app.ascii, "ascii", true, "plot ascii chart\nthis will automatically set to false when totalDuration is inf")
+	flag.BoolVar(&app.ascii, "ascii", false, "plot ascii chart\nthis will automatically set to false when totalDuration is inf")
 	flag.BoolVar(&app.silent, "silent", false, "Do not print any output")
 	flag.StringVar(&app.tlsKey, "key", "key.pem", "TLS key file")
 	flag.StringVar(&app.tlsCert, "cert", "cert.pem", "TLS cert file")

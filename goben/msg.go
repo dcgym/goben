@@ -17,6 +17,7 @@ type options struct {
 	PassiveServer  bool              // suppress server send
 	MaxSpeed       float64           // mbps
 	Table          map[string]string // send optional information client->server
+	TotalFlow	   uint64			 // total amount of data transmitted over each connection
 }
 
 type ack struct {

@@ -62,9 +62,13 @@ func open(app *config) {
 }
 
 func spawnClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections int, isTLS bool, targetHost string) {
-	wg.Add(2)
+	wg.Add(1)
 	go handleConnectionClient(app, wg, conn, c, connections, isTLS)
-	go handleMeasurement(app, targetHost, wg, c)
+	// turn off rtt measurement when measuring fixed flow completion time
+	if app.opt.TotalFlow == 0 {
+		wg.Add(1)
+		go handleMeasurement(app, targetHost, wg, c)
+	}
 }
 
 func tlsDial(proto, h string) (net.Conn, error) {
@@ -79,8 +83,9 @@ func tlsDial(proto, h string) (net.Conn, error) {
 
 // ExportInfo records data for export
 type ExportInfo struct {
-	Input  ChartData
-	Output ChartData
+	Input  			ChartData
+	Output 			ChartData
+	completionTime	time.Duration
 }
 
 func sendOptions(app *config, conn io.Writer) error {
@@ -130,8 +135,8 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 		log.Printf("handleConnectionClient: %s ack received", protoLabel(isTLS))
 	}
 
-	doneReader := make(chan struct{})
-	doneWriter := make(chan struct{})
+	doneReader := make(chan time.Duration)
+	doneWriter := make(chan time.Duration)
 
 	info := ExportInfo{
 		Input:  ChartData{},
@@ -141,55 +146,37 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 	var input *ChartData
 	var output *ChartData
 
-	if (app.csv != "" && app.totalDuration != "inf") || app.export != "" || app.chart != "" || app.ascii {
+	if (app.csv != "" && app.totalDuration != "inf" && opt.TotalFlow == 0) || app.export != "" || app.chart != "" || app.ascii {
 		input = &info.Input
 		output = &info.Output
 	}
 
-	go clientReader(conn, c, connections, doneReader, opt, input)
+	go clientReader(conn, c, connections, doneReader, opt, input, opt.TotalFlow)
 	if !app.passiveClient {
-		go clientWriter(conn, c, connections, doneWriter, opt, output)
+		go clientWriter(conn, c, connections, doneWriter, opt, output, opt.TotalFlow)
 	}
 
-	startTicker(app.opt.TotalDuration)
+	if opt.TotalFlow == 0 {
+		startTicker(app.opt.TotalDuration)
+		// clean up client
+		conn.Close() // force reader/writer to quit
 
-	conn.Close() // force reader/writer to quit
-
-	<-doneReader // wait reader exit
-	if !app.passiveClient {
-		<-doneWriter // wait writer exit
-	}
-
-	if app.csv != "" && app.totalDuration != "inf" {
-		filename := fmt.Sprintf(app.csv, c, conn.RemoteAddr())
-		log.Printf("exporting CSV test results to: %s", filename)
-		errExport := exportCsv(filename, &info)
-		if errExport != nil {
-			log.Printf("handleConnectionClient: export CSV: %s: %v", filename, errExport)
+		<-doneReader // wait reader exit
+		if !app.passiveClient {
+			<-doneWriter // wait writer exit
 		}
-	}
-
-	if app.export != "" {
-		filename := fmt.Sprintf(app.export, c, conn.RemoteAddr())
-		log.Printf("exporting YAML test results to: %s", filename)
-		errExport := export(filename, &info)
-		if errExport != nil {
-			log.Printf("handleConnectionClient: export YAML: %s: %v", filename, errExport)
+		generateDeliverables(app, c, conn, &info)
+		log.Printf("handleConnectionClient: closing: %d/%d %v", c, connections, conn.RemoteAddr())
+	} else {
+		<-doneReader // wait reader exit
+		if !app.passiveClient {
+			info.completionTime = <-doneWriter // wait writer exit
 		}
+
+		conn.Close()
+		generateDeliverables(app, c, conn, &info)
+		log.Printf("handleConnectionClient: closing: %d/%d %v", c, connections, conn.RemoteAddr())
 	}
-
-	if app.chart != "" {
-		filename := fmt.Sprintf(app.chart, c, conn.RemoteAddr())
-		log.Printf("rendering chart to: %s", filename)
-		errRender := chartRender(filename, &info.Input, &info.Output)
-		if errRender != nil {
-			log.Printf("handleConnectionClient: render PNG: %s: %v", filename, errRender)
-		}
-	}
-
-	plotascii(&info, conn.RemoteAddr().String(), c)
-
-	log.Printf("handleConnectionClient: closing: %d/%d %v", c, connections, conn.RemoteAddr())
 }
 
 // init and start Prober
@@ -227,28 +214,28 @@ func handleMeasurement(app *config, targetHost string, wg *sync.WaitGroup, connI
 		}
 }
 
-func clientReader(conn net.Conn, c, connections int, done chan struct{}, opt options, stat *ChartData) {
+func clientReader(conn net.Conn, c, connections int, done chan time.Duration, opt options, stat *ChartData, totalFlow uint64) {
 	log.Printf("clientReader: starting: %d/%d %v", c, connections, conn.RemoteAddr())
 
 	connIndex := fmt.Sprintf("%d/%d", c, connections)
 
 	buf := make([]byte, opt.ReadSize)
 
-	workLoop(connIndex, "clientReader", "rcv/s", conn.Read, buf, opt.ReportInterval, 0, stat)
+	workLoop(connIndex, "clientReader", "rcv/s", conn.Read, buf, opt.ReportInterval, 0, stat, done, totalFlow)
 
 	close(done)
 
 	log.Printf("clientReader: exiting: %d/%d %v", c, connections, conn.RemoteAddr())
 }
 
-func clientWriter(conn net.Conn, c, connections int, done chan struct{}, opt options, stat *ChartData) {
+func clientWriter(conn net.Conn, c, connections int, done chan time.Duration, opt options, stat *ChartData, totalFlow uint64) {
 	log.Printf("clientWriter: starting: %d/%d %v", c, connections, conn.RemoteAddr())
 
 	connIndex := fmt.Sprintf("%d/%d", c, connections)
 
 	buf := randBuf(opt.WriteSize)
 
-	workLoop(connIndex, "clientWriter", "snd/s", conn.Write, buf, opt.ReportInterval, opt.MaxSpeed, stat)
+	workLoop(connIndex, "clientWriter", "snd/s", conn.Write, buf, opt.ReportInterval, opt.MaxSpeed, stat, done, totalFlow)
 
 	close(done)
 
@@ -311,11 +298,12 @@ func (a *account) average(start time.Time, conn, label, cpsLabel string) {
 	log.Printf(fmtReport, conn, "average", label, mbps, cps, cpsLabel)
 }
 
-func workLoop(conn, label, cpsLabel string, f call, buf []byte, reportInterval time.Duration, maxSpeed float64, stat *ChartData) {
+func workLoop(conn, label, cpsLabel string, f call, buf []byte, reportInterval time.Duration, maxSpeed float64, stat *ChartData, done chan time.Duration, totalFlow uint64) {
 
 	start := time.Now()
 	acc := &account{}
 	acc.prevTime = start
+	totalBytesSoFar := 0
 
 	for {
 		runtime.Gosched()
@@ -331,7 +319,17 @@ func workLoop(conn, label, cpsLabel string, f call, buf []byte, reportInterval t
 			}
 		}
 
+		if totalFlow > 0 && uint64(totalBytesSoFar) >= totalFlow {
+			completionTime := time.Since(start)
+			if done != nil {
+				done <- completionTime // signal that the routine has completed
+			}
+			return
+		}
+
 		n, errCall := f(buf)
+		totalBytesSoFar = totalBytesSoFar + n
+
 		if errCall != nil {
 			log.Printf("workLoop: %s %s: %v", conn, label, errCall)
 			break
@@ -351,4 +349,35 @@ func startTicker(duration time.Duration) {
 	log.Printf("Connection lasts: %v timer", duration)
 
 	tickerPeriod.Stop()
+}
+
+func generateDeliverables(app *config, c int, conn net.Conn, info *ExportInfo) {
+	if app.csv != "" && app.totalDuration != "inf" {
+		filename := fmt.Sprintf(app.csv, c, conn.RemoteAddr())
+		log.Printf("exporting CSV test results to: %s", filename)
+		errExport := exportCsv(filename, info)
+		if errExport != nil {
+			log.Printf("handleConnectionClient: export CSV: %s: %v", filename, errExport)
+		}
+	}
+
+	if app.export != "" {
+		filename := fmt.Sprintf(app.export, c, conn.RemoteAddr())
+		log.Printf("exporting YAML test results to: %s", filename)
+		errExport := export(filename, info)
+		if errExport != nil {
+			log.Printf("handleConnectionClient: export YAML: %s: %v", filename, errExport)
+		}
+	}
+
+	if app.chart != "" {
+		filename := fmt.Sprintf(app.chart, c, conn.RemoteAddr())
+		log.Printf("rendering chart to: %s", filename)
+		errRender := chartRender(filename, &info.Input, &info.Output)
+		if errRender != nil {
+			log.Printf("handleConnectionClient: render PNG: %s: %v", filename, errRender)
+		}
+	}
+
+	plotascii(info, conn.RemoteAddr().String(), c)
 }

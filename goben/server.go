@@ -230,23 +230,32 @@ func handleConnection(conn net.Conn, c, connections int, isTLS bool) {
 		return
 	}
 
-	go serverReader(conn, opt, c, connections, isTLS)
+	var wg sync.WaitGroup
+
+	wg.Add(1)
+	go serverReader(conn, opt, c, connections, isTLS, &wg, opt.TotalFlow)
 
 	if !opt.PassiveServer {
 		go serverWriter(conn, opt, c, connections, isTLS)
 	}
 
-	tickerPeriod := time.NewTimer(opt.TotalDuration)
+	if opt.TotalFlow == 0 {
+		tickerPeriod := time.NewTimer(opt.TotalDuration)
 
-	<-tickerPeriod.C
-	log.Printf("handleConnection: %v timer", opt.TotalDuration)
+		<-tickerPeriod.C
+		log.Printf("handleConnection: %v timer", opt.TotalDuration)
 
-	tickerPeriod.Stop()
+		tickerPeriod.Stop()
+	} else {
+		wg.Wait()
+	}
 
 	log.Printf("handleConnection: closing: %v", conn.RemoteAddr())
 }
 
-func serverReader(conn net.Conn, opt options, c, connections int, isTLS bool) {
+func serverReader(conn net.Conn, opt options, c, connections int, isTLS bool, wg *sync.WaitGroup, totalFlow uint64) {
+
+	defer wg.Done()
 
 	log.Printf("serverReader: starting: %s %v", protoLabel(isTLS), conn.RemoteAddr())
 
@@ -254,7 +263,7 @@ func serverReader(conn net.Conn, opt options, c, connections int, isTLS bool) {
 
 	buf := make([]byte, opt.ReadSize)
 
-	workLoop(connIndex, "serverReader", "rcv/s", conn.Read, buf, opt.ReportInterval, 0, nil)
+	workLoop(connIndex, "serverReader", "rcv/s", conn.Read, buf, opt.ReportInterval, 0, nil, nil, totalFlow)
 
 	log.Printf("serverReader: exiting: %v", conn.RemoteAddr())
 }
@@ -274,7 +283,7 @@ func serverWriter(conn net.Conn, opt options, c, connections int, isTLS bool) {
 
 	buf := randBuf(opt.WriteSize)
 
-	workLoop(connIndex, "serverWriter", "snd/s", conn.Write, buf, opt.ReportInterval, opt.MaxSpeed, nil)
+	workLoop(connIndex, "serverWriter", "snd/s", conn.Write, buf, opt.ReportInterval, opt.MaxSpeed, nil, nil, 0)
 
 	log.Printf("serverWriter: exiting: %v", conn.RemoteAddr())
 }
@@ -296,7 +305,7 @@ func serverWriterTo(conn *net.UDPConn, opt options, dst net.Addr, acc *account, 
 
 	buf := randBuf(opt.WriteSize)
 
-	workLoop(connIndex, "serverWriterTo", "snd/s", udpWriteTo, buf, opt.ReportInterval, opt.MaxSpeed, nil)
+	workLoop(connIndex, "serverWriterTo", "snd/s", udpWriteTo, buf, opt.ReportInterval, opt.MaxSpeed, nil, nil, 0)
 
 	log.Printf("serverWriterTo: exiting: %v", dst)
 }

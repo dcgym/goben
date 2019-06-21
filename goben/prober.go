@@ -27,13 +27,13 @@ const (
 	probeInterval= 1000 * time.Millisecond // probe interval in milliseconds
 	pktInterval	= 300 * time.Millisecond // packet sending interval in milliseconds
 	pktsPerProbe = 3           // number of packets sent per probe
+	DEBUG = false
 )
 
 type ProberConfig struct {
 	proto         string        // the protocol for the ICMP packet connection (ie. ip4:icmp, ip4:1, ip6:58 ...)
 	source        string        // the server address
 	target       string      	// the host' addresses
-	debug		  bool 			// if true, turn on debugging mode => print lots of messages to console
 	csv	  		  string		// if true, export the latency measurement to csv file
 	connIndex	  int			// parallel connection index to host
 }
@@ -176,21 +176,18 @@ func (p *Prober) send(runID uint16, morePkts chan bool) {
 	seq := runID & uint16(0xff00)
 	for i := 0; i < pktsPerProbe; i++ {
 		target := p.config.target
-		if p.config.debug {
+		if DEBUG {
 			log.Printf("Request to=%s id=%d seq=%d", target, runID, seq)
 		}
 		if _, err := p.conn.WriteTo(p.packetToSend(runID, seq), parseIP(target)); err != nil {
 			log.Println(err.Error())
 			continue
 		}
-		if p.config.debug {
-			fmt.Println("SEND A ICMP PACKET")
-		}
 		morePkts <- true
 		seq++
 		time.Sleep(pktInterval)
 	}
-	if p.config.debug {
+	if DEBUG {
 		log.Printf("%s: Done sending packets, closing the tracker.", p.config.source)
 	}
 	close(morePkts)
@@ -235,7 +232,7 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 		rtt := time.Since(bytesToTime(echoMsg.Data))
 
 		// check if this packet belong to this run
-		if !matchPacket(runID, echoMsg.ID, echoMsg.Seq) && p.config.debug {
+		if !matchPacket(runID, echoMsg.ID, echoMsg.Seq) && DEBUG {
 			log.Printf(
 				"Reply from=%s id=%d seq=%d rtt=%s Unmatched packet, probably from the last probe run.\n",
 				target, echoMsg.ID, echoMsg.Seq, rtt)
@@ -244,13 +241,13 @@ func (p *Prober) recv(runID uint16, morePkts chan bool) {
 
 		// check if we have seen this packet before
 		pktID := fmt.Sprintf("%s_%d", target, echoMsg.Seq)
-		if received[pktID] && p.config.debug {
+		if received[pktID] && DEBUG {
 			log.Printf("Duplicate reply from=%s id=%d seq=%d rtt=%s\n", target, echoMsg.ID, echoMsg.Seq, rtt)
 			continue
 		}
 
 		// record the rrt
-		if p.config.debug {
+		if DEBUG {
 			log.Printf("RTT: src=%s, dst=%s, rtt=%s\n", p.config.source, target, rtt)
 		}
 
@@ -284,7 +281,7 @@ func (p *Prober) runProbe() {
 	}()
 	p.send(runID, morePkts)
 	wg.Wait()
-	if p.config.debug {
+	if DEBUG {
 		log.Printf("The prober from host %s finished!\n", p.config.source)
 	}
 }

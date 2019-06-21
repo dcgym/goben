@@ -77,24 +77,17 @@ func main() {
 	flag.BoolVar(&app.opt.PassiveServer, "passiveServer", false, "suppress server writes")
 	flag.Float64Var(&app.opt.MaxSpeed, "maxSpeed", 0, "bandwidth limit in mbps (0 means unlimited)")
 	flag.BoolVar(&app.udp, "udp", false, "run client in UDP mode")
-	flag.StringVar(&app.chart, "chart", "", "output filename for rendering chart on client\n'%d' is parallel connection index to host\n'%s' is hostname:port\nexample: -chart chart-%d-%s.png")
 	flag.StringVar(&app.export, "export", "", "output filename for YAML exporting test results on client\n'%d' is parallel connection index to host\n'%s' is hostname:port\nexample: -export export-%d-%s.yaml")
 	flag.StringVar(&app.csv, "csv", "", "output filename for CSV exporting test results on client\n'%d' is parallel connection index to host\n'%s' is hostname:port\nexample: -csv export-%d-%s.csv")
-	flag.BoolVar(&app.ascii, "ascii", false, "plot ascii chart\nthis will automatically set to false when totalDuration is inf")
 	flag.BoolVar(&app.silent, "silent", false, "Do not print any output")
 	flag.StringVar(&app.tlsKey, "key", "key.pem", "TLS key file")
 	flag.StringVar(&app.tlsCert, "cert", "cert.pem", "TLS cert file")
-	flag.BoolVar(&app.tls, "tls", true, "set to false to disable TLS")
-	flag.BoolVar(&app.debug, "debug", false, "if set to true, will print the process indicator messages in the console to help debugging")
+	flag.BoolVar(&app.tls, "tls", false, "set to false to disable TLS")
 	flag.Uint64Var(&app.opt.TotalFlow, "totalFlow", 0, "test bandwidth/latency by given total amount of data transmitted over each connection\ndata unit defaults to kB, totalDuration flag will be disabled")
 
 	flag.Parse()
 	if (app.silent) {
 		log.SetOutput(ioutil.Discard)
-	}
-
-	if errChart := badExportFilename("-chart", app.chart); errChart != nil {
-		log.Panicf("%s", errChart.Error())
 	}
 
 	if errExport := badExportFilename("-export", app.export); errExport != nil {
@@ -107,10 +100,6 @@ func main() {
 
 	app.reportInterval = defaultTimeUnit(app.reportInterval)
 
-	// when the user want to generate the traffic for unlimited time, disable chart rendering to avoid memory overflow
-	if app.totalDuration == "inf" {
-		app.ascii = false
-	}
 	app.totalDuration = defaultTimeUnit(app.totalDuration)
 
 	var errInterval error

@@ -1,4 +1,6 @@
-module github.com/udhos/goben
+module goben
+
+go 1.12
 
 require (
 	github.com/blend/go-sdk v1.0.0 // indirect

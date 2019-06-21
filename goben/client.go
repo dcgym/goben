@@ -65,10 +65,10 @@ func spawnClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections 
 	wg.Add(1)
 	go handleConnectionClient(app, wg, conn, c, connections, isTLS)
 	// turn off rtt measurement when measuring fixed flow completion time
-	if app.opt.TotalFlow == 0 {
-		wg.Add(1)
-		go handleMeasurement(app, targetHost, wg, c)
-	}
+	/*	if app.opt.TotalFlow == 0 {
+			wg.Add(1)
+			go handleMeasurement(app, targetHost, wg, c)
+		}*/
 }
 
 func tlsDial(proto, h string) (net.Conn, error) {
@@ -146,7 +146,7 @@ func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, c
 	var input *ChartData
 	var output *ChartData
 
-	if (app.csv != "" && app.totalDuration != "inf" && opt.TotalFlow == 0) || app.export != "" || app.chart != "" || app.ascii {
+	if (app.csv != "" && app.totalDuration != "inf" && opt.TotalFlow == 0) || app.export != "" {
 		input = &info.Input
 		output = &info.Output
 	}
@@ -192,7 +192,6 @@ func handleMeasurement(app *config, targetHost string, wg *sync.WaitGroup, connI
 			proto,
 			source,		 	// default is the local machine's external IP
 			targetHost,
-			app.debug,
 			app.csv,
 			connIndex,
 		}
@@ -369,15 +368,4 @@ func generateDeliverables(app *config, c int, conn net.Conn, info *ExportInfo) {
 			log.Printf("handleConnectionClient: export YAML: %s: %v", filename, errExport)
 		}
 	}
-
-	if app.chart != "" {
-		filename := fmt.Sprintf(app.chart, c, conn.RemoteAddr())
-		log.Printf("rendering chart to: %s", filename)
-		errRender := chartRender(filename, &info.Input, &info.Output)
-		if errRender != nil {
-			log.Printf("handleConnectionClient: render PNG: %s: %v", filename, errRender)
-		}
-	}
-
-	plotascii(info, conn.RemoteAddr().String(), c)
 }

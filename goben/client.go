@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"encoding/gob"
 	"fmt"
-	"io"
 	"log"
 	"math/rand"
 	"net"
@@ -33,13 +32,12 @@ func open(app *config) {
 		for i := 0; i < app.connections; i++ {
 
 			log.Printf("open: opening TLS=%v %s %d/%d: %s", app.tls, proto, i, app.connections, hh)
-
 			if !app.udp && app.tls {
 				// try TLS first
 				log.Printf("open: trying TLS")
 				conn, errDialTLS := tlsDial(proto, hh)
 				if errDialTLS == nil {
-					spawnClient(app, &wg, conn, i, app.connections, true, h)
+					spawnClient(app, &wg, conn, i, app.connections, h)
 					continue
 				}
 				log.Printf("open: trying TLS: failure: %s: %s: %v", proto, hh, errDialTLS)
@@ -54,18 +52,27 @@ func open(app *config) {
 				log.Printf("open: dial %s: %s: %v", proto, hh, errDial)
 				continue
 			}
-			spawnClient(app, &wg, conn, i, app.connections, false, h)
+			spawnClient(app, &wg, conn, i, app.connections, h)
 		}
 	}
 
 	wg.Wait()
 }
 
-func spawnClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections int, isTLS bool, targetHost string) {
+func spawnClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections int, targetHost string) {
 	wg.Add(1)
-	go handleConnectionClient(app, wg, conn, c, connections, isTLS)
+	if app.csv != "" {
+		filename := fmt.Sprintf(app.csv, c, conn.RemoteAddr())
+		log.Printf("Creating CVS file: %s", filename)
+		errExport := initCSV(filename)
+		if errExport != nil {
+			log.Printf("handleConnectionClient: export CSV: %s: %v", filename, errExport)
+		}
+	}
+
+	go handleConnectionClient(app, wg, conn, c, connections)
 	// turn off rtt measurement when measuring fixed flow completion time
-	/*	if app.opt.TotalFlow == 0 {
+	/*	if app.opt.totalFlow == 0 {
 			wg.Add(1)
 			go handleMeasurement(app, targetHost, wg, c)
 		}*/
@@ -88,7 +95,7 @@ type ExportInfo struct {
 	completionTime	time.Duration
 }
 
-func sendOptions(app *config, conn io.Writer) error {
+func sendOptions(app *config, conn net.Conn) error {
 	opt := app.opt
 	if app.udp {
 		var optBuf bytes.Buffer
@@ -109,74 +116,70 @@ func sendOptions(app *config, conn io.Writer) error {
 			return errOpt
 		}
 	}
-	return nil
-}
 
-func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections int, isTLS bool) {
-	defer wg.Done()
-
-	log.Printf("handleConnectionClient: starting %s %d/%d %v", protoLabel(isTLS), c, connections, conn.RemoteAddr())
-
-	// send options
-	if errOpt := sendOptions(app, conn); errOpt != nil {
-		return
-	}
-	opt := app.opt
 	log.Printf("handleConnectionClient: options sent: %v", opt)
 
 	// receive ack
-	//log.Printf("handleConnectionClient: FIXME WRITEME server does not send ack for UDP")
+	// FIXME WRITEME server does not send ack for UDP
 	if !app.udp {
 		var a ack
 		if errAck := ackRecv(app.udp, conn, &a); errAck != nil {
 			log.Printf("handleConnectionClient: receiving ack: %v", errAck)
-			return
+			return errAck
 		}
-		log.Printf("handleConnectionClient: %s ack received", protoLabel(isTLS))
+		log.Printf("handleConnectionClient: Received ACK.")
 	}
+	return nil
+}
 
-	doneReader := make(chan time.Duration)
-	doneWriter := make(chan time.Duration)
+func handleConnectionClient(app *config, wg *sync.WaitGroup, conn net.Conn, c, connections int) {
+	defer wg.Done()
 
 	info := ExportInfo{
 		Input:  ChartData{},
 		Output: ChartData{},
 	}
-
+	log.Printf("handleConnectionClient: starting %s %d/%d %v", c, connections, conn.RemoteAddr())
+	// send options
+	if errOpt := sendOptions(app, conn); errOpt != nil {
+		return
+	}
 	var input *ChartData
 	var output *ChartData
-
-	if (app.csv != "" && app.totalDuration != "inf" && opt.TotalFlow == 0) || app.export != "" {
+	opt := app.opt
+	if (app.csv != "" && app.totalDuration != "inf" && opt.totalFlow == 0) || app.export != "" {
 		input = &info.Input
 		output = &info.Output
 	}
 
-	go clientReader(conn, c, connections, doneReader, opt, input, opt.TotalFlow)
-	if !app.passiveClient {
-		go clientWriter(conn, c, connections, doneWriter, opt, output, opt.TotalFlow)
-	}
+	for start := time.Now(); time.Since(start) < app.opt.TotalDuration; {
 
-	if opt.TotalFlow == 0 {
-		startTicker(app.opt.TotalDuration)
-		// clean up client
-		conn.Close() // force reader/writer to quit
-
-		<-doneReader // wait reader exit
+		doneReader := make(chan time.Duration)
+		doneWriter := make(chan time.Duration)
 		if !app.passiveClient {
-			<-doneWriter // wait writer exit
+			go clientWriter(conn, c, connections, doneWriter, opt, output)
+		}
+		go clientReader(conn, c, connections, doneReader, opt, input)
+
+		if !opt.PassiveServer {
+			select {
+				case <-doneReader: // wait reader exit:
+				case <-time.After(app.opt.TotalDuration):
+					log.Printf("Flow Time Limit exceeded!\n")
+			}
+		}
+		if !app.passiveClient {
+			select {
+				case info.completionTime = <-doneWriter: // wait writer exit:
+				case <-time.After(app.opt.TotalDuration):
+					log.Printf("Flow Time Limit exceeded!\n")
+			}
 		}
 		generateDeliverables(app, c, conn, &info)
 		log.Printf("handleConnectionClient: closing: %d/%d %v", c, connections, conn.RemoteAddr())
-	} else {
-		<-doneReader // wait reader exit
-		if !app.passiveClient {
-			info.completionTime = <-doneWriter // wait writer exit
-		}
-
-		conn.Close()
-		generateDeliverables(app, c, conn, &info)
-		log.Printf("handleConnectionClient: closing: %d/%d %v", c, connections, conn.RemoteAddr())
 	}
+	// clean up client
+	conn.Close() // force reader/writer to quit
 }
 
 // init and start Prober
@@ -213,28 +216,28 @@ func handleMeasurement(app *config, targetHost string, wg *sync.WaitGroup, connI
 		}
 }
 
-func clientReader(conn net.Conn, c, connections int, done chan time.Duration, opt options, stat *ChartData, totalFlow uint64) {
+func clientReader(conn net.Conn, c, connections int, done chan time.Duration, opt options, stat *ChartData) {
 	log.Printf("clientReader: starting: %d/%d %v", c, connections, conn.RemoteAddr())
 
 	connIndex := fmt.Sprintf("%d/%d", c, connections)
 
 	buf := make([]byte, opt.ReadSize)
 
-	workLoop(connIndex, "clientReader", "rcv/s", conn.Read, buf, opt.ReportInterval, 0, stat, done, totalFlow)
+	workLoop(connIndex, "clientReader", "rcv/s", conn.Read, buf, opt.ReportInterval, 0, stat, done, opt.totalFlow)
 
 	close(done)
 
 	log.Printf("clientReader: exiting: %d/%d %v", c, connections, conn.RemoteAddr())
 }
 
-func clientWriter(conn net.Conn, c, connections int, done chan time.Duration, opt options, stat *ChartData, totalFlow uint64) {
+func clientWriter(conn net.Conn, c, connections int, done chan time.Duration, opt options, stat *ChartData) {
 	log.Printf("clientWriter: starting: %d/%d %v", c, connections, conn.RemoteAddr())
 
 	connIndex := fmt.Sprintf("%d/%d", c, connections)
 
 	buf := randBuf(opt.WriteSize)
 
-	workLoop(connIndex, "clientWriter", "snd/s", conn.Write, buf, opt.ReportInterval, opt.MaxSpeed, stat, done, totalFlow)
+	workLoop(connIndex, "clientWriter", "snd/s", conn.Write, buf, opt.ReportInterval, opt.MaxSpeed, stat, done, opt.totalFlow)
 
 	close(done)
 
@@ -304,7 +307,7 @@ func workLoop(conn, label, cpsLabel string, f call, buf []byte, reportInterval t
 	acc.prevTime = start
 	totalBytesSoFar := 0
 
-	for {
+	for (uint64(totalBytesSoFar) < totalFlow || totalFlow == 0) {
 		runtime.Gosched()
 
 		if maxSpeed > 0 {
@@ -318,14 +321,6 @@ func workLoop(conn, label, cpsLabel string, f call, buf []byte, reportInterval t
 			}
 		}
 
-		if totalFlow > 0 && uint64(totalBytesSoFar) >= totalFlow {
-			completionTime := time.Since(start)
-			if done != nil {
-				done <- completionTime // signal that the routine has completed
-			}
-			return
-		}
-
 		n, errCall := f(buf)
 		totalBytesSoFar = totalBytesSoFar + n
 
@@ -333,11 +328,14 @@ func workLoop(conn, label, cpsLabel string, f call, buf []byte, reportInterval t
 			log.Printf("workLoop: %s %s: %v", conn, label, errCall)
 			break
 		}
-
 		acc.update(n, reportInterval, conn, label, cpsLabel, stat)
 	}
-
+	completionTime := time.Since(start)
 	acc.average(start, conn, label, cpsLabel)
+	if done != nil {
+		done <- completionTime // signal that the routine has completed
+	}
+	return
 }
 
 // Control totalDuration: start the timer that will tick the given duration time
@@ -353,8 +351,8 @@ func startTicker(duration time.Duration) {
 func generateDeliverables(app *config, c int, conn net.Conn, info *ExportInfo) {
 	if app.csv != "" && app.totalDuration != "inf" {
 		filename := fmt.Sprintf(app.csv, c, conn.RemoteAddr())
-		log.Printf("exporting CSV test results to: %s", filename)
-		errExport := exportCsv(filename, info)
+		log.Printf("append CSV test results to: %s", filename)
+		errExport := appendCSV(filename, info)
 		if errExport != nil {
 			log.Printf("handleConnectionClient: export CSV: %s: %v", filename, errExport)
 		}

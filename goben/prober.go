@@ -56,7 +56,7 @@ func (p *Prober) Init(config ProberConfig) error {
 	if p.config.csv != "" {
 		filePath := fmt.Sprintf(p.config.csv, p.config.connIndex, p.config.target)
 		header := []string{"dst", "rtt"}
-		writer, file, err := CreateCSV(filePath, header)
+		writer, file, err := openCSV(filePath, header)
 		if err != nil {
 			log.Panicf("Cannot create a logging file to persist network traffic statistics! %v\n", err.Error())
 		}

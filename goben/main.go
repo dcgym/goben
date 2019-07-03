@@ -30,12 +30,10 @@ type config struct {
 	chart          string
 	export         string
 	csv            string
-	ascii          bool // plot ascii chart
 	silent         bool // suppress any output
 	tlsCert        string
 	tlsKey         string
 	tls            bool
-	debug		   bool
 }
 
 func (h *hostList) String() string {
@@ -83,7 +81,7 @@ func main() {
 	flag.StringVar(&app.tlsKey, "key", "key.pem", "TLS key file")
 	flag.StringVar(&app.tlsCert, "cert", "cert.pem", "TLS cert file")
 	flag.BoolVar(&app.tls, "tls", false, "set to false to disable TLS")
-	flag.Uint64Var(&app.opt.TotalFlow, "totalFlow", 0, "test bandwidth/latency by given total amount of data transmitted over each connection\ndata unit defaults to kB, totalDuration flag will be disabled")
+	flag.Uint64Var(&app.opt.totalFlow, "totalFlow", 0, "test bandwidth/latency by given total amount of data transmitted over each connection\ndata unit defaults to kB, totalDuration flag will be disabled")
 
 	flag.Parse()
 	if (app.silent) {

@@ -233,13 +233,13 @@ func handleConnection(conn net.Conn, c, connections int, isTLS bool) {
 	var wg sync.WaitGroup
 
 	wg.Add(1)
-	go serverReader(conn, opt, c, connections, isTLS, &wg, opt.TotalFlow)
+	go serverReader(conn, opt, c, connections, isTLS, &wg, opt.totalFlow)
 
 	if !opt.PassiveServer {
 		go serverWriter(conn, opt, c, connections, isTLS)
 	}
 
-	if opt.TotalFlow == 0 {
+	if opt.totalFlow == 0 {
 		tickerPeriod := time.NewTimer(opt.TotalDuration)
 
 		<-tickerPeriod.C
